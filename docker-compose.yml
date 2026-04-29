@@ -32,10 +32,16 @@ services:
       LOG_DIR: /var/log/sentinelx
       LOG_FILE: /var/log/sentinelx/sentinelx.log
       LOG_EXEC_FILE: /var/log/sentinelx/exec.log
-      SENTINEL_UPLOAD_DIR: /var/lib/sentinelx/uploads
+      # En modo host, los archivos temporales del /edit deben estar en un path
+      # accesible tanto desde el container (para crearlos) como desde el host
+      # (para que pensa-safe-edit via nsenter los lea). Se usa /tmp para esto.
+      SENTINEL_UPLOAD_DIR: ${SENTINEL_UPLOAD_DIR:-/tmp/sentinelx-uploads}
     volumes:
       - sentinelx-logs:/var/log/sentinelx
       - sentinelx-uploads:/var/lib/sentinelx
+      # En modo host, los uploads/temporales del /edit van a /tmp del host
+      # para que pensa-safe-edit (ejecutado via nsenter) pueda acceder a ellos.
+      - /tmp/sentinelx-uploads:/tmp/sentinelx-uploads
     ports:
       - "127.0.0.1:8091:8091"
     networks:
