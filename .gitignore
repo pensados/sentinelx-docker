@@ -1,0 +1,6 @@
+.env
+sentinelx-core/
+sentinelx-core-mcp/
+__pycache__/
+*.pyc
+*.pyo

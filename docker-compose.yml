@@ -1,0 +1,76 @@
+services:
+
+  # ─────────────────────────────────────────────────────────────────
+  # sentinelx-core
+  # pid=host + privileged permite a nsenter entrar en los namespaces
+  # del host y ejecutar comandos allí directamente.
+  # ─────────────────────────────────────────────────────────────────
+  sentinelx-core:
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+    container_name: sentinelx-core
+    restart: unless-stopped
+    pid: "host"
+    privileged: true
+    environment:
+      SENTINEL_TOKEN: ${SENTINEL_TOKEN:?SENTINEL_TOKEN requerido — ver .env.example}
+      AGENT_PORT: "8091"
+      LOG_DIR: /var/log/sentinelx
+      LOG_FILE: /var/log/sentinelx/sentinelx.log
+      LOG_EXEC_FILE: /var/log/sentinelx/exec.log
+      SENTINEL_UPLOAD_DIR: /var/lib/sentinelx/uploads
+    volumes:
+      - sentinelx-logs:/var/log/sentinelx
+      - sentinelx-uploads:/var/lib/sentinelx
+    ports:
+      - "127.0.0.1:8091:8091"
+    networks:
+      - sentinelx-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf",
+             "-H", "Authorization: Bearer ${SENTINEL_TOKEN}",
+             "http://localhost:8091/capabilities"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ─────────────────────────────────────────────────────────────────
+  # sentinelx-mcp
+  # Proxy MCP entre Claude y el core. Valida OIDC.
+  # ─────────────────────────────────────────────────────────────────
+  sentinelx-mcp:
+    build:
+      context: .
+      dockerfile: mcp/Dockerfile
+    container_name: sentinelx-mcp
+    restart: unless-stopped
+    depends_on:
+      sentinelx-core:
+        condition: service_healthy
+    environment:
+      MCP_PORT: "8099"
+      SENTINELX_URL: "http://sentinelx-core:8091"
+      SENTINEL_TOKEN: ${SENTINEL_TOKEN}
+      OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER requerido}
+      OIDC_JWKS_URI: ${OIDC_JWKS_URI:?OIDC_JWKS_URI requerido}
+      OIDC_EXPECTED_AUDIENCE: ${OIDC_EXPECTED_AUDIENCE:-}
+      RESOURCE_URL: ${RESOURCE_URL:-https://sentinelx.example.com}
+      AUTH_DEBUG: ${AUTH_DEBUG:-false}
+      LOG_DIR: /var/log/sentinelx-mcp
+    volumes:
+      - sentinelx-mcp-logs:/var/log/sentinelx-mcp
+    ports:
+      - "127.0.0.1:8099:8099"
+    networks:
+      - sentinelx-net
+
+networks:
+  sentinelx-net:
+    driver: bridge
+
+volumes:
+  sentinelx-logs:
+  sentinelx-uploads:
+  sentinelx-mcp-logs:
