@@ -2,8 +2,16 @@ services:
 
   # ─────────────────────────────────────────────────────────────────
   # sentinelx-core
-  # pid=host + privileged permite a nsenter entrar en los namespaces
-  # del host y ejecutar comandos allí directamente.
+  #
+  # SENTINEL_EXEC_MODE controla dónde corren los comandos:
+  #
+  #   host  (default) — nsenter al host real.
+  #                     Requiere pid=host + privileged=true (abajo).
+  #                     Acceso total al filesystem, systemd, red del host.
+  #
+  #   container       — dentro del container solamente.
+  #                     Comentar o eliminar pid y privileged.
+  #                     Útil para agentes aislados / CI / dev.
   # ─────────────────────────────────────────────────────────────────
   sentinelx-core:
     build:
@@ -11,10 +19,15 @@ services:
       dockerfile: core/Dockerfile
     container_name: sentinelx-core
     restart: unless-stopped
+
+    # Requerido solo para SENTINEL_EXEC_MODE=host
+    # Comentar estas dos líneas si usás modo container
     pid: "host"
     privileged: true
+
     environment:
       SENTINEL_TOKEN: ${SENTINEL_TOKEN:?SENTINEL_TOKEN requerido — ver .env.example}
+      SENTINEL_EXEC_MODE: ${SENTINEL_EXEC_MODE:-host}
       AGENT_PORT: "8091"
       LOG_DIR: /var/log/sentinelx
       LOG_FILE: /var/log/sentinelx/sentinelx.log

@@ -1,17 +1,19 @@
-# agent_docker.py — SentinelX variante Docker (nsenter host bridge)
+# agent_docker.py — SentinelX variante Docker
 #
-# Diferencia clave respecto a agent.py:
-#   Todos los comandos se ejecutan en el host real via nsenter,
-#   entrando en el PID namespace del proceso init (PID 1).
-#   El container ve el mismo filesystem, red, procesos y servicios
-#   que el host — sin SSH, sin claves, sin configuracion extra.
+# Soporta dos modos de ejecucion, controlados por la variable de entorno
+# SENTINEL_EXEC_MODE (default: "host"):
 #
-# Requiere en docker-compose.yml:
-#   pid: "host"
-#   privileged: true
+#   host       — Los comandos se ejecutan en el HOST real via nsenter,
+#                entrando en el PID namespace del proceso init (PID 1).
+#                El container ve el mismo filesystem, red y servicios del host.
+#                Requiere en docker-compose.yml: pid: "host" + privileged: true
 #
-# La allowlist de comandos es identica a agent.py — el comportamiento
-# desde el punto de vista del MCP y de Claude es exactamente el mismo.
+#   container  — Los comandos se ejecutan DENTRO del container.
+#                Util para agentes aislados, CI/CD, o entornos de desarrollo.
+#                No requiere privilegios especiales.
+#
+# La allowlist de comandos y todos los endpoints son identicos en ambos modos.
+# El modo activo se expone en GET /capabilities → "mode".
 
 from fastapi import FastAPI, Request, Header, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel, model_validator
@@ -40,9 +42,14 @@ UPLOAD_BASE_DIR = Path(os.getenv("SENTINEL_UPLOAD_DIR", "/var/lib/sentinelx/uplo
 UPLOAD_TMP_DIR = UPLOAD_BASE_DIR / ".sentinelx_uploads"
 MAX_UPLOAD_BYTES = int(os.getenv("SENTINEL_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024 * 1024)))
 
-# nsenter host bridge
-# Entra en todos los namespaces del PID 1 del host.
-# Con pid=host en compose, /proc/1 apunta al init del host real.
+# ── Modo de ejecucion ────────────────────────────────────────────────────────
+# SENTINEL_EXEC_MODE=host      → nsenter al host (default)
+# SENTINEL_EXEC_MODE=container → corre local en el container
+
+EXEC_MODE = os.getenv("SENTINEL_EXEC_MODE", "host").strip().lower()
+if EXEC_MODE not in ("host", "container"):
+    raise ValueError(f"SENTINEL_EXEC_MODE debe ser 'host' o 'container', recibido: '{EXEC_MODE}'")
+
 NSENTER_BASE = [
     "nsenter",
     "--target", "1",
@@ -53,6 +60,10 @@ NSENTER_BASE = [
     "--pid",
     "--",
 ]
+
+def _prefix(args: list[str]) -> list[str]:
+    """Antepone nsenter si estamos en modo host, o devuelve args sin cambios."""
+    return NSENTER_BASE + args if EXEC_MODE == "host" else args
 
 PATH_INDEX = {
     "root":          {"path": "/",                          "description": "Raiz del filesystem del host"},
@@ -253,7 +264,7 @@ def execute_command(cmd: str):
     try:
         print(f"[SentinelX:nsenter] {cmd}", flush=True)
         result = subprocess.run(
-            NSENTER_BASE + ["bash", "-lc", cmd],
+            _prefix(["bash", "-lc", cmd]),
             text=True, capture_output=True, timeout=60,
         )
         duration = round(time.time() - start, 2)
@@ -271,7 +282,7 @@ def run_process(args: list[str], timeout: int = 60, env=None, cwd=None):
     start = time.time()
     try:
         result = subprocess.run(
-            NSENTER_BASE + args,
+            _prefix(args),
             text=True, capture_output=True, timeout=timeout, env=env, cwd=cwd,
         )
         duration = round(time.time() - start, 2)
@@ -288,7 +299,7 @@ def run_process(args: list[str], timeout: int = 60, env=None, cwd=None):
 def get_command_help(cmd: str):
     try:
         result = subprocess.run(
-            NSENTER_BASE + ["bash", "-lc", cmd],
+            _prefix(["bash", "-lc", cmd]),
             text=True, capture_output=True, timeout=10,
         )
         return (result.stdout or result.stderr or "No help available").strip()
@@ -402,7 +413,8 @@ async def get_capabilities(authorization: str = Header(None)):
     _require_agent_token(authorization)
     pensa_safe_edit_help = get_command_help(PENSA_SAFE_EDIT_BIN)
     return {
-        "agent": "sentinelx", "version": "0.3.5-docker", "mode": "docker-nsenter",
+        "agent": "sentinelx", "version": "0.3.5-docker", "mode": f"docker-{EXEC_MODE}",
+        "exec_mode": EXEC_MODE,
         "allowed_commands": ALLOWED_COMMANDS,
         "service_actions": {n: {k: v for k, v in m.items() if k != "action_commands"} for n, m in SERVICE_ACTIONS.items()},
         "categories": {
@@ -425,10 +437,10 @@ async def get_capabilities(authorization: str = Header(None)):
         "playbooks": PLAYBOOKS,
         "help": {
             "pensa-safe-edit": pensa_safe_edit_help,
-            "nsenter": (
-                "Todos los comandos se ejecutan en el host real via nsenter --target 1. "
-                "No se requiere SSH ni configuracion adicional. "
-                "El container debe correr con pid=host y privileged=true."
+            "exec_mode": (
+                f"Modo activo: {EXEC_MODE}. "
+                "host → comandos ejecutados en el host real via nsenter (requiere pid=host + privileged=true). "
+                "container → comandos ejecutados dentro del container (aislado, sin privilegios especiales)."
             ),
         },
     }
@@ -516,7 +528,7 @@ async def restart_service(request: Request, authorization: str = Header(None)):
     if not meta: return {"error": f"Service not allowed: {service}"}
     cmd = meta.get("action_commands", {}).get("restart")
     if not cmd: return {"error": f"Restart not configured for service: {service}"}
-    subprocess.Popen(NSENTER_BASE + ["bash", "-lc", cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen(_prefix(["bash", "-lc", cmd]), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     message = f"{service} restart triggered"
     log_exec(service, message)
     context.update(service, message, status="ok")
