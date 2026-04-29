@@ -444,8 +444,8 @@ async def get_capabilities(authorization: str = Header(None)):
             "pensa-safe-edit": pensa_safe_edit_help,
             "exec_mode": (
                 f"Modo activo: {EXEC_MODE}. "
-                "host → comandos ejecutados en el host real via nsenter (requiere pid=host + privileged=true). "
-                "container → comandos ejecutados dentro del container (aislado, sin privilegios especiales)."
+                "host → comandos ejecutados en el host real via nsenter (requiere pid=host + privileged=true). Allowlist activa. "
+                "container → comandos ejecutados dentro del container (aislado). Sin allowlist — todos los comandos permitidos."
             ),
         },
     }
@@ -457,11 +457,15 @@ async def exec_command(request: Request, authorization: str = Header(None)):
     data = await request.json()
     cmd = data.get("cmd")
     if not cmd: raise HTTPException(status_code=400, detail="Missing command")
-    allowed_match = any(cmd.startswith(a) for a in ALLOWED_COMMANDS)
-    if not allowed_match:
-        context.update(cmd, "blocked", status="blocked")
-        log_exec(cmd, "blocked", allowed=False)
-        return {"error": f"Command not allowed: {cmd}"}
+    # En modo host la allowlist protege el servidor real.
+    # En modo container el aislamiento de Docker es la capa de seguridad —
+    # la allowlist se omite para permitir uso libre del container.
+    if EXEC_MODE == "host":
+        allowed_match = any(cmd.startswith(a) for a in ALLOWED_COMMANDS)
+        if not allowed_match:
+            context.update(cmd, "blocked", status="blocked")
+            log_exec(cmd, "blocked", allowed=False)
+            return {"error": f"Command not allowed: {cmd}"}
     result = execute_command(cmd)
     log_exec(cmd, result["output"])
     context.update(cmd, result["output"], status="ok")
