@@ -36,7 +36,12 @@ AGENT_TOKEN = os.getenv("SENTINEL_TOKEN", "changeme")
 
 BASE_DIR = Path(__file__).resolve().parent
 BIN_DIR = BASE_DIR / "bin"
-PENSA_SAFE_EDIT_BIN = os.getenv("SENTINEL_SAFE_EDIT_BIN", str(BIN_DIR / "sentinelx-safe-edit"))
+
+# En modo host, pensa-safe-edit se resuelve via PATH del host (nsenter).
+# En modo container, se usa la ruta relativa dentro del container.
+_DEFAULT_SAFE_EDIT = "pensa-safe-edit" if os.getenv("SENTINEL_EXEC_MODE", "host").strip().lower() == "host" \
+    else str(BIN_DIR / "sentinelx-safe-edit")
+PENSA_SAFE_EDIT_BIN = os.getenv("SENTINEL_SAFE_EDIT_BIN", _DEFAULT_SAFE_EDIT)
 
 UPLOAD_BASE_DIR = Path(os.getenv("SENTINEL_UPLOAD_DIR", "/var/lib/sentinelx/uploads")).resolve()
 UPLOAD_TMP_DIR = UPLOAD_BASE_DIR / ".sentinelx_uploads"

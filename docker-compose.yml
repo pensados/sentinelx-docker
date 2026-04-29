@@ -64,7 +64,7 @@ services:
         condition: service_healthy
     environment:
       MCP_PORT: "8099"
-      SENTINELX_URL: "http://sentinelx-core:8091"
+      SENTINELX_URL: "http://127.0.0.1:8091"
       SENTINEL_TOKEN: ${SENTINEL_TOKEN}
       OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER requerido}
       OIDC_JWKS_URI: ${OIDC_JWKS_URI:?OIDC_JWKS_URI requerido}
@@ -72,16 +72,18 @@ services:
       RESOURCE_URL: ${RESOURCE_URL:-https://sentinelx.example.com}
       AUTH_DEBUG: ${AUTH_DEBUG:-false}
       LOG_DIR: /var/log/sentinelx-mcp
+    # network_mode host: el MCP necesita resolver DNS externos para validar
+    # tokens OIDC (fetch del JWKS). Si el daemon Docker tiene iptables=false,
+    # los containers bridge no tienen salida a internet — host network lo resuelve.
+    # El core es accesible en 127.0.0.1:8091 (puerto del host).
+    network_mode: host
     volumes:
       - sentinelx-mcp-logs:/var/log/sentinelx-mcp
-    ports:
-      - "127.0.0.1:8099:8099"
-    networks:
-      - sentinelx-net
 
 networks:
   sentinelx-net:
     driver: bridge
+    # Usada solo por sentinelx-core. El MCP usa network_mode=host.
 
 volumes:
   sentinelx-logs:
