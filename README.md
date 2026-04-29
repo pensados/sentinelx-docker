@@ -65,7 +65,7 @@ Copy `.env.example` to `.env` and fill in:
 source .env
 curl -s -H "Authorization: Bearer $SENTINEL_TOKEN" \
   http://localhost:8091/capabilities | jq .mode
-# → "docker-nsenter"
+# → "docker-host"
 ```
 
 ## Security model

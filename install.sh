@@ -80,6 +80,11 @@ else
 
 SENTINEL_TOKEN=${SENTINEL_TOKEN}
 
+# Execution mode: host (default) or container
+# host      → commands run on the HOST via nsenter (requires pid=host + privileged=true)
+# container → commands run inside the container only (isolated, no special privileges)
+SENTINEL_EXEC_MODE=host
+
 # OIDC — fill in your provider values
 OIDC_ISSUER=
 OIDC_JWKS_URI=
