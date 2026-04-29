@@ -4,6 +4,23 @@ Docker deployment stack for [SentinelX Core](https://github.com/pensados/sentine
 
 Runs both services as containers while giving the agent full access to the host system via **nsenter** — no SSH keys, no extra configuration.
 
+## Quick install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pensados/sentinelx-docker/main/install.sh | bash
+```
+
+The script clones this repo (including submodules), generates a `.env` with a random token, prompts for OIDC config, and starts the stack.
+
+## Manual setup
+
+```bash
+git clone --recurse-submodules https://github.com/pensados/sentinelx-docker
+cd sentinelx-docker
+cp .env.example .env && nano .env
+docker compose up -d --build
+```
+
 ## Architecture
 
 ```
@@ -30,23 +47,9 @@ The `sentinelx-core` container runs with `pid: host` and `privileged: true`. Eve
 - Docker Compose v2
 - Linux host (nsenter requires Linux PID namespaces)
 
-## Setup
+## Configuration
 
-### 1. Clone this repo and the source repos
-
-```bash
-git clone https://github.com/pensados/sentinelx-docker
-cd sentinelx-docker
-git clone https://github.com/pensados/sentinelx-core
-git clone https://github.com/pensados/sentinelx-core-mcp
-```
-
-### 2. Configure environment
-
-```bash
-cp .env.example .env
-nano .env
-```
+Copy `.env.example` to `.env` and fill in:
 
 | Variable | Description |
 |---|---|
@@ -56,19 +59,10 @@ nano .env
 | `OIDC_EXPECTED_AUDIENCE` | Expected `aud` claim (leave empty to skip) |
 | `RESOURCE_URL` | Public URL of this SentinelX instance |
 
-### 3. Build and run
+## Verify
 
 ```bash
-docker compose up -d --build
-```
-
-### 4. Verify
-
-```bash
-# Check containers
-docker compose ps
-
-# Test the agent
+source .env
 curl -s -H "Authorization: Bearer $SENTINEL_TOKEN" \
   http://localhost:8091/capabilities | jq .mode
 # → "docker-nsenter"
@@ -78,19 +72,24 @@ curl -s -H "Authorization: Bearer $SENTINEL_TOKEN" \
 
 `privileged: true` gives the container full access to the host. This is intentional — SentinelX is a trusted agent that needs host-level access to manage infrastructure.
 
-The security boundary is the **command allowlist** in `core/agent_docker.py`. Only commands listed in `ALLOWED_COMMANDS` can be executed, and all executions are logged.
+The security boundary is the **command allowlist** in `core/agent_docker.py`. All executions are logged to the `sentinelx-logs` volume.
 
 The MCP layer adds OAuth/OIDC authentication — only users with valid tokens and correct scopes can reach the agent.
 
 Ports `8091` and `8099` are bound to `127.0.0.1` only. To expose the MCP externally, place a reverse proxy (nginx, Caddy) in front with TLS.
 
-## Customizing the allowlist
-
-Edit `ALLOWED_COMMANDS` in `core/agent_docker.py` and rebuild:
+## Logs
 
 ```bash
-docker compose build sentinelx-core
-docker compose up -d sentinelx-core
+docker compose logs -f
+```
+
+## Updating submodules
+
+```bash
+git submodule update --remote --merge
+git add sentinelx-core sentinelx-core-mcp
+git commit -m "chore: update submodules"
 ```
 
 ## Related projects

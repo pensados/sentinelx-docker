@@ -1,0 +1,6 @@
+[submodule "sentinelx-core"]
+	path = sentinelx-core
+	url = https://github.com/pensados/sentinelx-core
+[submodule "sentinelx-core-mcp"]
+	path = sentinelx-core-mcp
+	url = https://github.com/pensados/sentinelx-core-mcp
