@@ -96,7 +96,28 @@ EOF
     info "Generated .env with random SENTINEL_TOKEN."
 fi
 
-# ── 4. OIDC prompt ───────────────────────────────────────────────────────────
+# ── 4. Install pensa-safe-edit on the host ───────────────────────────────────
+# sentinelx-core includes the pensa-safe-edit binary in bin/.
+# In host mode (SENTINEL_EXEC_MODE=host), the agent calls it via nsenter
+# using the host's PATH — so it needs to be installed on the host.
+
+info "Installing pensa-safe-edit on the host..."
+SAFE_EDIT_SRC="$INSTALL_DIR/sentinelx-core/bin/sentinelx-safe-edit"
+SAFE_EDIT_DST="/usr/local/bin/pensa-safe-edit"
+
+if [ ! -f "$SAFE_EDIT_SRC" ]; then
+    warn "pensa-safe-edit not found at $SAFE_EDIT_SRC — skipping."
+    warn "Run: sudo cp sentinelx-core/bin/sentinelx-safe-edit /usr/local/bin/pensa-safe-edit"
+else
+    if sudo cp "$SAFE_EDIT_SRC" "$SAFE_EDIT_DST" && sudo chmod +x "$SAFE_EDIT_DST"; then
+        info "pensa-safe-edit installed at $SAFE_EDIT_DST"
+    else
+        warn "Could not install pensa-safe-edit (needs sudo). Run manually:"
+        warn "  sudo cp $SAFE_EDIT_SRC $SAFE_EDIT_DST && sudo chmod +x $SAFE_EDIT_DST"
+    fi
+fi
+
+# ── 5. OIDC prompt ───────────────────────────────────────────────────────────
 
 source .env 2>/dev/null || true
 
@@ -117,7 +138,7 @@ if [ -z "${OIDC_ISSUER:-}" ]; then
     fi
 fi
 
-# ── 5. Build and start ───────────────────────────────────────────────────────
+# ── 6. Build and start ───────────────────────────────────────────────────────
 
 echo ""
 info "Building and starting SentinelX..."
