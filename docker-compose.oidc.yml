@@ -28,7 +28,7 @@ services:
         condition: service_healthy
     environment:
       MCP_PORT: "8099"
-      SENTINELX_URL: "http://127.0.0.1:8091"
+      SENTINELX_URL: "http://127.0.0.1:${CORE_PORT:-8091}"
       SENTINEL_TOKEN: ${SENTINEL_TOKEN}
       OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER is required in oidc mode — run install.sh}
       OIDC_JWKS_URI: ${OIDC_JWKS_URI:?OIDC_JWKS_URI is required in oidc mode}
