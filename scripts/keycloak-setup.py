@@ -374,23 +374,23 @@ def main() -> None:
             print(f"  Warning: {e}", flush=True)
 
     # 10. Done
+    mcp_url = f"{RESOURCE_URL}/mcp"
     print("", flush=True)
     print("=" * 60, flush=True)
     print("Keycloak setup complete!", flush=True)
     print("", flush=True)
-    print(f"  OIDC Issuer:   {issuer}", flush=True)
-    print(f"  JWKS URI:      {jwks_uri}", flush=True)
     print(f"  OIDC Issuer:      {issuer}", flush=True)
     print(f"  Client ID:        {client_id_value}", flush=True)
     print(f"  Client Secret:    {client_secret_val}", flush=True)
     print(f"  Admin console:    https://{AUTH_DOMAIN}/admin", flush=True)
-    print(f"  Admin user:       admin / (same as KC_ADMIN_PASSWORD)", flush=True)
+    print(f"  Admin user:       admin / KC_ADMIN_PASSWORD from .env", flush=True)
     print("", flush=True)
     print("To connect Claude or ChatGPT:", flush=True)
-    print(f"  1. Add connector URL:   {RESOURCE_URL}/mcp", flush=True)
-    print(f"  2. Advanced settings →  OAuth Client ID:     {client_id_value}", flush=True)
-    print(f"                          OAuth Client Secret: {client_secret_val}", flush=True)
-    print(f"  3. Log in with:         admin / KC_ADMIN_PASSWORD", flush=True)
+    print(f"  1. Add connector URL:    {mcp_url}", flush=True)
+    print(f"  2. Advanced OAuth settings:", flush=True)
+    print(f"       OAuth Client ID:     {client_id_value}", flush=True)
+    print(f"       OAuth Client Secret: {client_secret_val}", flush=True)
+    print(f"  3. Log in with:          admin / KC_ADMIN_PASSWORD", flush=True)
     print("=" * 60, flush=True)
 
 
