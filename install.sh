@@ -370,9 +370,9 @@ else
             curl -s -X POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records" \
                 -H "Authorization: Bearer ${CF_TOKEN}" \
                 -H "Content-Type: application/json" \
-                -d "{\"type\":\"A\",\"name\":\"${AUTH_SUBDOMAIN}\",\"content\":\"${PUBLIC_IP}\",\"proxied\":true}" \
+                -d "{\"type\":\"A\",\"name\":\"${AUTH_SUBDOMAIN}\",\"content\":\"${PUBLIC_IP}\",\"proxied\":false}" \
                 >/dev/null
-            info "Created DNS record: ${AUTH_DOMAIN} → ${PUBLIC_IP}"
+            info "Created DNS record: ${AUTH_DOMAIN} → ${PUBLIC_IP} (proxied=false — required for OAuth)"
         fi
     fi
     # (DOMAIN_MODE=auto: sslip.io, no DNS action needed)
