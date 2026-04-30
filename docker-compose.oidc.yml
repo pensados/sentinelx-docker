@@ -132,6 +132,9 @@ services:
       ZITADEL_EXTERNALPORT: "443"
       ZITADEL_TLS_ENABLED: "false"   # TLS terminated by reverse proxy
 
+      # Use built-in login UI v1 (v2 requires a separate container we don't run)
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "false"
+
       # ── First instance bootstrap (runs only on first start) ────
       ZITADEL_FIRSTINSTANCE_ORG_NAME: SentinelX
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin
