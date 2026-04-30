@@ -152,6 +152,9 @@ def main() -> None:
             "sslRequired": "external",
             "accessTokenLifespan": 3600,
             "refreshTokenMaxReuse": 0,
+            # Do not ask for profile info (name/email) on first login
+            "editUsernameAllowed": False,
+            "registrationEmailAsUsername": False,
         })
         print(f"  Realm '{REALM}' created.", flush=True)
     except RuntimeError as e:
@@ -162,6 +165,20 @@ def main() -> None:
 
     # Refresh token for the new realm context
     token = get_token()
+
+    # Disable UPDATE_PROFILE required action — users won't see profile form on first login
+    try:
+        req_actions = api("GET",
+            f"/admin/realms/{REALM}/authentication/required-actions", token)
+        for action in (req_actions if isinstance(req_actions, list) else []):
+            if action.get("alias") == "UPDATE_PROFILE" and action.get("defaultAction"):
+                action["defaultAction"] = False
+                api("PUT",
+                    f"/admin/realms/{REALM}/authentication/required-actions/{action['alias']}",
+                    token, action)
+                print("  Disabled UPDATE_PROFILE required action.", flush=True)
+    except Exception as e:
+        print(f"  Warning: {e}", flush=True)
 
     # 3. Create custom client scopes
     print("Creating sentinelx:* client scopes...", flush=True)

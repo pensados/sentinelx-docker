@@ -117,7 +117,7 @@ else
         read -rp "  Choose [1/2] (default: 1): " _exec_choice
     fi
     case "${_exec_choice:-1}" in
-        2) EXEC_MODE="container" ;;
+        2|container) EXEC_MODE="container" ;;
         *) EXEC_MODE="host" ;;
     esac
     info "Execution mode: ${EXEC_MODE}"
@@ -131,7 +131,7 @@ else
     echo "  1) simple  — A single secret token protects the endpoint."
     echo "               Easy setup. Good for personal use."
     echo ""
-    echo "  2) oidc    — Full OAuth2/OIDC via Zitadel (included in the stack)."
+    echo "  2) oidc    — Full OAuth2/OIDC via Keycloak (included in the stack)."
     echo "               Login with username + password. Supports multiple users,"
     echo "               fine-grained permissions, and audit logs."
     echo "               Recommended for teams or production deployments."
@@ -142,7 +142,7 @@ else
         read -rp "  Choose [1/2] (default: 1): " _auth_choice
     fi
     case "${_auth_choice:-1}" in
-        2) AUTH_MODE="oidc" ;;
+        2|oidc) AUTH_MODE="oidc" ;;
         *) AUTH_MODE="simple" ;;
     esac
     info "Authentication mode: ${AUTH_MODE}"
@@ -184,7 +184,7 @@ else
     fi
 
     case "${_domain_choice:-1}" in
-        2)
+        2|manual)
             DOMAIN_MODE="manual"
             echo ""
             BASE_DOMAIN="${SX_BASE_DOMAIN:-}"
@@ -197,7 +197,7 @@ else
                 AUTH_DOMAIN="${AUTH_SUBDOMAIN}.${BASE_DOMAIN}"
             fi
             ;;
-        3)
+        3|cloudflare)
             DOMAIN_MODE="cloudflare"
             echo ""
             BASE_DOMAIN="${SX_BASE_DOMAIN:-}"
@@ -505,6 +505,13 @@ CADDY_EOF
 # Keycloak auth domain block (OIDC mode only)
 if [ "$AUTH_MODE" = "oidc" ] && [ -n "${AUTH_DOMAIN:-}" ]; then
     echo -e "  ${BOLD}── nginx (Keycloak auth — ${AUTH_DOMAIN}) ──────────────────────${NC}"
+    echo ""
+    echo -e "  ${BOLD}⚠️  IMPORTANT — Cloudflare DNS:${NC}"
+    echo "  The auth subdomain (${AUTH_DOMAIN}) must be set to"
+    echo "  proxied=false (DNS only / grey cloud) in Cloudflare."
+    echo "  Cloudflare Bot Fight Mode blocks OAuth/DCR requests without"
+    echo "  User-Agent, which breaks the Claude/ChatGPT login flow."
+    echo ""
     cat << KC_NGINX_EOF
 
   server {
