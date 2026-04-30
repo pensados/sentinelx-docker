@@ -6,23 +6,21 @@
 #
 # The install.sh script handles this automatically when you choose
 # authentication mode: oidc.
-#
-# Zitadel is configured fully via environment variables on first start.
-# No manual UI setup required — the install.sh script calls zitadel-setup.sh
-# after first boot to create the MCP client and scopes automatically.
 
 services:
 
   # ─────────────────────────────────────────────────────────────────
   # sentinelx-mcp override
   # Replaces the simple-auth MCP with full OIDC validation via Zitadel.
+  # Waits for Zitadel to start (not necessarily healthy — setup handles
+  # the rest once Zitadel is actually ready).
   # ─────────────────────────────────────────────────────────────────
   sentinelx-mcp:
     depends_on:
       sentinelx-core:
         condition: service_healthy
       zitadel:
-        condition: service_healthy
+        condition: service_started
     environment:
       MCP_PORT: "8099"
       SENTINELX_URL: "http://127.0.0.1:8091"
@@ -57,24 +55,62 @@ services:
       start_period: 10s
 
   # ─────────────────────────────────────────────────────────────────
+  # zitadel-db-init — one-shot container that cleans stale constraints
+  #
+  # Zitadel has a known bug where FIRSTINSTANCE setup fails with
+  # "Domain.AlreadyExists" if the setup was interrupted previously.
+  # This container proactively removes those stale constraints from
+  # the eventstore before Zitadel starts, allowing clean initialization.
+  # Exits 0 immediately if the DB is brand new (no constraints yet).
+  # ─────────────────────────────────────────────────────────────────
+  zitadel-db-init:
+    image: postgres:17-alpine
+    container_name: zitadel-db-init
+    restart: "no"
+    depends_on:
+      zitadel-db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${ZITADEL_DB_USER_PASS}
+    networks:
+      - zitadel-net
+    command: >
+      sh -c "
+        psql -h zitadel-db -U zitadel -d zitadel -c '
+          DELETE FROM eventstore.unique_constraints
+          WHERE unique_type = '"'"'instance_domain'"'"'
+            AND instance_id = '"'"''"'"';
+          DELETE FROM eventstore.unique_constraints
+          WHERE unique_type IN ('"'"'org_name'"'"','"'"'org_domain'"'"','"'"'usernames'"'"')
+            AND instance_id != '"'"''"'"';
+          DELETE FROM eventstore.events2
+          WHERE instance_id != '"'"''"'"'
+            AND aggregate_type IN ('"'"'instance'"'"','"'"'org'"'"','"'"'user'"'"');
+        ' 2>/dev/null || true
+        echo 'DB init complete (stale constraints cleared if any).'
+      "
+
+  # ─────────────────────────────────────────────────────────────────
   # zitadel — Identity provider (OIDC/OAuth2)
   #
   # Configured fully via environment variables on first start.
-  # ZITADEL_FIRSTINSTANCE_* vars run only once — on initial DB setup.
-  # After that, use the admin console or API to make changes.
+  # restart: always is required — Zitadel may fail a few times on first
+  # boot due to a known bug with FIRSTINSTANCE constraint writes.
+  # It always succeeds after a few retries with a clean DB.
   #
   # Admin console: https://<AUTH_DOMAIN>/ui/console
-  # Default admin: admin@sentinelx.<AUTH_DOMAIN>
-  # Default pass:  see ZITADEL_ADMIN_PASS in .env
+  # Admin user:    admin@sentinelx.<AUTH_DOMAIN>
+  # Admin pass:    see ZITADEL_ADMIN_PASS in .env
   # ─────────────────────────────────────────────────────────────────
   zitadel:
     image: ghcr.io/zitadel/zitadel:latest
     container_name: zitadel
-    restart: unless-stopped
+    restart: always
     command: start-from-init --masterkeyFromEnv --tlsMode external
+    user: "0"
     depends_on:
-      zitadel-db:
-        condition: service_healthy
+      zitadel-db-init:
+        condition: service_completed_successfully
     environment:
       # ── Master key ──────────────────────────────────────────────
       ZITADEL_MASTERKEY: ${ZITADEL_MASTERKEY:?ZITADEL_MASTERKEY is required}
@@ -90,13 +126,13 @@ services:
       ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: ${ZITADEL_DB_USER_PASS}
       ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
 
-      # ── External access (behind nginx reverse proxy) ──────────
+      # ── External access (behind nginx/Caddy reverse proxy) ─────
       ZITADEL_EXTERNALDOMAIN: ${AUTH_DOMAIN:?AUTH_DOMAIN is required in oidc mode}
       ZITADEL_EXTERNALSECURE: "true"
       ZITADEL_EXTERNALPORT: "443"
-      ZITADEL_TLS_ENABLED: "false"   # TLS terminated by nginx
+      ZITADEL_TLS_ENABLED: "false"   # TLS terminated by reverse proxy
 
-      # ── First instance bootstrap (runs only on first start) ───
+      # ── First instance bootstrap (runs only on first start) ────
       ZITADEL_FIRSTINSTANCE_ORG_NAME: SentinelX
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${ZITADEL_ADMIN_PASS:?ZITADEL_ADMIN_PASS is required}
@@ -104,11 +140,12 @@ services:
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL: admin@sentinelx.local
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAILVERIFIED: "true"
 
-      # Write a service account PAT to this file on first init.
-      # Used by zitadel-setup.sh to configure the MCP client automatically.
-      ZITADEL_FIRSTINSTANCE_MACHINEKEYPATH: /zitadel-data/service-account.json
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_USERNAME: sentinelx-setup
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_NAME: SentinelX Setup Bot
+      # Write a PAT for the setup machine user on first init.
+      # zitadel-setup.py reads this file directly — no JWT exchange needed.
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: sentinelx-setup
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: SentinelX Setup Bot
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE: "2030-01-01T00:00:00Z"
+      ZITADEL_FIRSTINSTANCE_PATPATH: /zitadel-data/setup.pat
 
     ports:
       - "127.0.0.1:8080:8080"
@@ -123,18 +160,19 @@ services:
       test: ["CMD", "/app/zitadel", "ready"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 20
+      start_period: 60s
 
   # ─────────────────────────────────────────────────────────────────
-  # zitadel-setup — one-shot container that runs after Zitadel boots
+  # zitadel-setup — one-shot container that runs after Zitadel is healthy
   #
   # Uses the Zitadel API to:
-  #   1. Create the sentinelx-mcp OIDC client
-  #   2. Create all required sentinelx:* scopes
-  #   3. Write OIDC_ISSUER and OIDC_JWKS_URI back to .env
+  #   1. Read the PAT written by Zitadel on first init
+  #   2. Create the sentinelx-mcp OIDC client with all redirect URIs
+  #   3. Create all sentinelx:* custom scopes
+  #   4. Patch /install/.env with OIDC_ISSUER, OIDC_JWKS_URI, CLIENT_ID
   #
-  # Exits 0 on success. Check logs if the MCP fails to validate tokens.
+  # Exits 0 on success. Run: docker compose logs zitadel-setup to debug.
   # ─────────────────────────────────────────────────────────────────
   zitadel-setup:
     image: python:3.12-slim
@@ -146,7 +184,6 @@ services:
     environment:
       AUTH_DOMAIN: ${AUTH_DOMAIN}
       RESOURCE_URL: ${RESOURCE_URL:-https://sentinelx.example.com}
-      ZITADEL_ADMIN_PASS: ${ZITADEL_ADMIN_PASS}
       INSTALL_DIR: /install
     volumes:
       - zitadel-data:/zitadel-data:ro

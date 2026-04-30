@@ -317,7 +317,15 @@ else
         ZITADEL_MASTERKEY=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 32; echo)
         ZITADEL_DB_ADMIN_PASS=$(openssl rand -hex 16)
         ZITADEL_DB_USER_PASS=$(openssl rand -hex 16)
-        ZITADEL_ADMIN_PASS=$(openssl rand -base64 12 | tr -d '/+=' | head -c 12; echo)
+        ZITADEL_ADMIN_PASS=$(python3 -c "
+import secrets, string
+chars = string.ascii_letters + string.digits + '!@#\$%^&*'
+while True:
+    pwd = ''.join(secrets.choice(chars) for _ in range(16))
+    if (any(c.isupper() for c in pwd) and any(c.islower() for c in pwd)
+            and any(c.isdigit() for c in pwd) and any(c in '!@#\$%^&*' for c in pwd)):
+        print(pwd); break
+")
         set -o pipefail
         OIDC_ISSUER="https://${AUTH_DOMAIN}"
         OIDC_JWKS_URI="https://${AUTH_DOMAIN}/oauth/v2/keys"
