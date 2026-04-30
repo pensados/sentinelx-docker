@@ -104,7 +104,11 @@ def wait_for_keycloak(max_wait: int = 120) -> None:
     deadline = time.time() + max_wait
     while time.time() < deadline:
         try:
-            urllib.request.urlopen(f"{KEYCLOAK_URL}/health/ready", timeout=5)
+            # Use master realm OIDC discovery — available as soon as KC is ready
+            urllib.request.urlopen(
+                f"{KEYCLOAK_URL}/realms/master/.well-known/openid-configuration",
+                timeout=5
+            )
             print("Keycloak is ready.", flush=True)
             return
         except Exception:

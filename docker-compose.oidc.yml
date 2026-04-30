@@ -108,7 +108,7 @@ services:
       - sentinelx-net
 
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health/ready || exit 1"]
+      test: ["CMD-SHELL", "{ printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&0; grep '200'; } 0<>/dev/tcp/127.0.0.1/9000"]
       interval: 15s
       timeout: 5s
       retries: 10
