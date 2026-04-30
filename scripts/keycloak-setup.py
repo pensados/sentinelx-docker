@@ -307,7 +307,18 @@ def main() -> None:
     issuer   = f"https://{AUTH_DOMAIN}/realms/{REALM}"
     jwks_uri = f"https://{AUTH_DOMAIN}/realms/{REALM}/protocol/openid-connect/certs"
 
-    # 8. Patch .env
+    # 7b. Get client secret
+    print("Fetching client secret...", flush=True)
+    client_secret_val = ""
+    try:
+        secret_resp = api("GET",
+            f"/admin/realms/{REALM}/clients/{client_uuid}/client-secret", token)
+        client_secret_val = secret_resp.get("value", "")
+        print("  Client secret obtained.", flush=True)
+    except Exception as e:
+        print(f"  Warning: could not fetch client secret: {e}", flush=True)
+
+    # 8. Patch .env with all OIDC values including client credentials
     env_file = INSTALL_DIR / ".env"
     print(f"Patching {env_file} with OIDC values...", flush=True)
     if env_file.exists():
@@ -315,18 +326,26 @@ def main() -> None:
         patches = {
             "OIDC_ISSUER=":            f"OIDC_ISSUER={issuer}",
             "OIDC_JWKS_URI=":          f"OIDC_JWKS_URI={jwks_uri}",
-            "OIDC_EXPECTED_AUDIENCE=": f"OIDC_EXPECTED_AUDIENCE=",  # empty — Keycloak uses resource
+            "OIDC_EXPECTED_AUDIENCE=": f"OIDC_EXPECTED_AUDIENCE=",
+            "OIDC_CLIENT_ID=":         f"OIDC_CLIENT_ID={client_id_value}",
+            "OIDC_CLIENT_SECRET=":     f"OIDC_CLIENT_SECRET={client_secret_val}",
         }
         new_lines = []
+        found_keys = set()
         for line in lines:
             patched = False
             for prefix, replacement in patches.items():
                 if line.startswith(prefix):
                     new_lines.append(replacement)
+                    found_keys.add(prefix)
                     patched = True
                     break
             if not patched:
                 new_lines.append(line)
+        # Append any keys not yet present
+        for prefix, replacement in patches.items():
+            if prefix not in found_keys:
+                new_lines.append(replacement)
         env_file.write_text("\n".join(new_lines) + "\n")
         print("  .env updated.", flush=True)
     else:
@@ -361,13 +380,17 @@ def main() -> None:
     print("", flush=True)
     print(f"  OIDC Issuer:   {issuer}", flush=True)
     print(f"  JWKS URI:      {jwks_uri}", flush=True)
-    print(f"  Client ID:     {client_id_value}", flush=True)
-    print(f"  DCR endpoint:  {issuer}/clients-registrations/openid-connect", flush=True)
-    print(f"  Admin console: https://{AUTH_DOMAIN}/admin", flush=True)
-    print(f"  Admin user:    admin / (same as KC_ADMIN_PASSWORD)", flush=True)
+    print(f"  OIDC Issuer:      {issuer}", flush=True)
+    print(f"  Client ID:        {client_id_value}", flush=True)
+    print(f"  Client Secret:    {client_secret_val}", flush=True)
+    print(f"  Admin console:    https://{AUTH_DOMAIN}/admin", flush=True)
+    print(f"  Admin user:       admin / (same as KC_ADMIN_PASSWORD)", flush=True)
     print("", flush=True)
-    print("Claude and ChatGPT will register automatically via DCR.", flush=True)
-    print("Just add the MCP endpoint URL — no client_id needed.", flush=True)
+    print("To connect Claude or ChatGPT:", flush=True)
+    print(f"  1. Add connector URL:   {RESOURCE_URL}/mcp", flush=True)
+    print(f"  2. Advanced settings →  OAuth Client ID:     {client_id_value}", flush=True)
+    print(f"                          OAuth Client Secret: {client_secret_val}", flush=True)
+    print(f"  3. Log in with:         admin / KC_ADMIN_PASSWORD", flush=True)
     print("=" * 60, flush=True)
 
 

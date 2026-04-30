@@ -339,12 +339,15 @@ EOF
 OIDC_ISSUER=${OIDC_ISSUER}
 OIDC_JWKS_URI=${OIDC_JWKS_URI}
 OIDC_EXPECTED_AUDIENCE=
+OIDC_CLIENT_ID=
+OIDC_CLIENT_SECRET=
 AUTH_DEBUG=false
 
 # ── Keycloak ──────────────────────────────────────────────────────────────────
 AUTH_DOMAIN=${AUTH_DOMAIN}
 KC_DB_PASSWORD=${KC_DB_PASSWORD}
 KC_ADMIN_PASSWORD=${KC_ADMIN_PASSWORD}
+RESOURCE_URL=${RESOURCE_URL:-https://${MCP_DOMAIN}}
 EOF
     else
         cat >> .env <<EOF
@@ -540,6 +543,11 @@ if [ "$AUTH_MODE" = "simple" ]; then
 else
     echo "    4. You'll be redirected to Keycloak to log in."
     echo "       Admin credentials are in .env (KC_ADMIN_PASSWORD)"
+    echo ""
+    echo "  OAuth credentials for Claude / ChatGPT connector:"
+    echo "  (Run after keycloak-setup finishes — check .env or docker logs keycloak-setup)"
+    echo "    OAuth Client ID:     sentinelx-mcp"
+    echo "    OAuth Client Secret: (see OIDC_CLIENT_SECRET in .env after setup)"
 fi
 echo ""
 echo -e "  ${BOLD}Connect ChatGPT${NC}"
