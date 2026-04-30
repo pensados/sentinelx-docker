@@ -28,6 +28,8 @@ box()     { echo -e "${CYAN}┌────────────────�
 
 REPO_URL="https://github.com/pensados/sentinelx-docker"
 INSTALL_DIR="${SENTINELX_DIR:-$HOME/sentinelx-docker}"
+DRY_RUN=0
+[[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1 && warn "DRY-RUN mode — no containers will be started."
 
 # ── Banner ───────────────────────────────────────────────────────────────────
 clear
@@ -109,7 +111,11 @@ else
     echo "  2) container  — Commands run inside an isolated container."
     echo "                  Safe sandbox. Good for development or untrusted tasks."
     echo ""
-    read -rp "  Choose [1/2] (default: 1): " _exec_choice
+    if [ -n "${SX_EXEC_MODE:-}" ]; then
+        _exec_choice="$SX_EXEC_MODE"
+    else
+        read -rp "  Choose [1/2] (default: 1): " _exec_choice
+    fi
     case "${_exec_choice:-1}" in
         2) EXEC_MODE="container" ;;
         *) EXEC_MODE="host" ;;
@@ -130,7 +136,11 @@ else
     echo "               fine-grained permissions, and audit logs."
     echo "               Recommended for teams or production deployments."
     echo ""
-    read -rp "  Choose [1/2] (default: 1): " _auth_choice
+    if [ -n "${SX_AUTH_MODE:-}" ]; then
+        _auth_choice="$SX_AUTH_MODE"
+    else
+        read -rp "  Choose [1/2] (default: 1): " _auth_choice
+    fi
     case "${_auth_choice:-1}" in
         2) AUTH_MODE="oidc" ;;
         *) AUTH_MODE="simple" ;;
@@ -167,27 +177,34 @@ else
     echo ""
     echo "  3) Cloudflare — Auto-create the DNS record using a Cloudflare API token."
     echo ""
-    read -rp "  Choose [1/2/3] (default: 1): " _domain_choice
+    if [ -n "${SX_DOMAIN_MODE:-}" ]; then
+        _domain_choice="$SX_DOMAIN_MODE"
+    else
+        read -rp "  Choose [1/2/3] (default: 1): " _domain_choice
+    fi
 
     case "${_domain_choice:-1}" in
         2)
             DOMAIN_MODE="manual"
             echo ""
-            read -rp "  Base domain (e.g. yourdomain.com): " BASE_DOMAIN
+            BASE_DOMAIN="${SX_BASE_DOMAIN:-}"
+            [ -z "$BASE_DOMAIN" ] && read -rp "  Base domain (e.g. yourdomain.com): " BASE_DOMAIN
             BASE_DOMAIN="${BASE_DOMAIN:-yourdomain.com}"
-            MCP_SUBDOMAIN="sentinelx"
+            MCP_SUBDOMAIN="${SX_MCP_SUBDOMAIN:-sentinelx}"
             MCP_DOMAIN="${MCP_SUBDOMAIN}.${BASE_DOMAIN}"
             if [ "$AUTH_MODE" = "oidc" ]; then
-                AUTH_SUBDOMAIN="auth-sentinelx"
+                AUTH_SUBDOMAIN="${SX_AUTH_SUBDOMAIN:-auth-sentinelx}"
                 AUTH_DOMAIN="${AUTH_SUBDOMAIN}.${BASE_DOMAIN}"
             fi
             ;;
         3)
             DOMAIN_MODE="cloudflare"
             echo ""
-            read -rp "  Base domain (e.g. yourdomain.com): " BASE_DOMAIN
+            BASE_DOMAIN="${SX_BASE_DOMAIN:-}"
+            [ -z "$BASE_DOMAIN" ] && read -rp "  Base domain (e.g. yourdomain.com): " BASE_DOMAIN
             BASE_DOMAIN="${BASE_DOMAIN:-yourdomain.com}"
-            read -rp "  Cloudflare API Token (Zone:Edit permissions): " CF_TOKEN
+            CF_TOKEN="${SX_CF_TOKEN:-}"
+            [ -z "$CF_TOKEN" ] && read -rp "  Cloudflare API Token (Zone:Edit permissions): " CF_TOKEN
             MCP_SUBDOMAIN="sentinelx"
             MCP_DOMAIN="${MCP_SUBDOMAIN}.${BASE_DOMAIN}"
             if [ "$AUTH_MODE" = "oidc" ]; then
@@ -227,9 +244,17 @@ else
         echo "  You can verify propagation with:"
         echo "    dig ${MCP_DOMAIN} +short"
         echo ""
-        read -rp "  Press Enter once the DNS records are active (or Ctrl+C to abort)..."
+        if [ -z "${SX_SKIP_DNS_WAIT:-}" ]; then
+            read -rp "  Press Enter once the DNS records are active (or Ctrl+C to abort)..."
+        else
+            warn "SX_SKIP_DNS_WAIT set — skipping DNS wait prompt."
+        fi
 
         # Verify DNS propagation (up to 2 min)
+        if [ -n "${SX_SKIP_DNS_WAIT:-}" ]; then
+            warn "SX_SKIP_DNS_WAIT set — skipping DNS verification."
+            DNS_OK=true
+        else
         info "Verifying DNS propagation..."
         DNS_OK=false
         for i in $(seq 1 12); do
@@ -244,9 +269,14 @@ else
         done
         if [ "$DNS_OK" = "false" ]; then
             warn "DNS did not propagate within 2 minutes."
-            read -rp "  Continue anyway? [y/N]: " _continue
-            [[ "${_continue:-n}" =~ ^[Yy]$ ]] || exit 1
+            if [ -n "${SX_SKIP_DNS_WAIT:-}" ] || [ -n "${SX_YES:-}" ]; then
+                warn "Continuing anyway (SX_SKIP_DNS_WAIT/SX_YES set)."
+            else
+                read -rp "  Continue anyway? [y/N]: " _continue
+                [[ "${_continue:-n}" =~ ^[Yy]$ ]] || exit 1
+            fi
         fi
+        fi  # end SX_SKIP_DNS_WAIT check
 
     elif [ "$DOMAIN_MODE" = "cloudflare" ]; then
         info "Creating DNS record via Cloudflare API..."
@@ -282,10 +312,13 @@ else
     SENTINEL_TOKEN=$(openssl rand -hex 32)
 
     if [ "$AUTH_MODE" = "oidc" ]; then
-        ZITADEL_MASTERKEY=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 32)
+        # set +o pipefail temporarily: tr+head combo triggers SIGPIPE by design
+        set +o pipefail
+        ZITADEL_MASTERKEY=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 32; echo)
         ZITADEL_DB_ADMIN_PASS=$(openssl rand -hex 16)
         ZITADEL_DB_USER_PASS=$(openssl rand -hex 16)
-        ZITADEL_ADMIN_PASS=$(openssl rand -base64 12 | tr -d '/+=' | head -c 12)
+        ZITADEL_ADMIN_PASS=$(openssl rand -base64 12 | tr -d '/+=' | head -c 12; echo)
+        set -o pipefail
         OIDC_ISSUER="https://${AUTH_DOMAIN}"
         OIDC_JWKS_URI="https://${AUTH_DOMAIN}/oauth/v2/keys"
     fi
@@ -358,8 +391,12 @@ echo -e "  ${YELLOW}Connect Claude at:${NC}  claude.ai → Settings → Integrat
 echo -e "             URL:    ${BOLD}${MCP_URL}/mcp${NC}"
 echo ""
 
-read -rp "  Start SentinelX with this configuration? [Y/n]: " _confirm
-[[ "${_confirm:-y}" =~ ^[Yy]$ ]] || { warn "Aborted."; exit 0; }
+if [ -z "${SX_YES:-}" ]; then
+    read -rp "  Start SentinelX with this configuration? [Y/n]: " _confirm
+    [[ "${_confirm:-y}" =~ ^[Yy]$ ]] || { warn "Aborted."; exit 0; }
+else
+    info "SX_YES set — skipping confirmation."
+fi
 
 # ── 6. Build & start ─────────────────────────────────────────────────────────
 section "Step 5/6 — Building and starting SentinelX"
@@ -373,6 +410,15 @@ else
     COMPOSE_OVERRIDE=""
 fi
 COMPOSE_CMD="docker compose ${COMPOSE_BASE} ${COMPOSE_OVERRIDE}"
+
+
+if [ "$DRY_RUN" = "1" ]; then
+    info "DRY-RUN: would run: ${COMPOSE_CMD} up -d --build"
+    info "DRY-RUN: .env generated at $INSTALL_DIR/.env"
+    info "DRY-RUN: configuration complete — exiting without starting containers."
+    cat "$INSTALL_DIR/.env"
+    exit 0
+fi
 
 info "Building images..."
 cd "$INSTALL_DIR" && env -i HOME="$HOME" PATH="$PATH" \
