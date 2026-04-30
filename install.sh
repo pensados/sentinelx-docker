@@ -543,8 +543,8 @@ cat << NGINX_EOF
       ssl_certificate_key /path/to/privkey.pem;
 
       # The MCP endpoint — this is the URL you add to Claude or ChatGPT
-      location = /mcp {
-          proxy_pass http://127.0.0.1:${MCP_PORT}/mcp;
+      location /mcp {
+          proxy_pass http://127.0.0.1:${MCP_PORT};
           proxy_http_version 1.1;
           proxy_set_header Host \$host;
           proxy_set_header X-Forwarded-Proto https;
@@ -557,9 +557,10 @@ cat << NGINX_EOF
       }
 
       # OAuth protected resource discovery (required for Claude/ChatGPT OAuth flow)
-      location = /.well-known/oauth-protected-resource {
+      # Only relevant in OIDC mode — in simple mode the token is passed directly
+      location /.well-known/oauth-protected-resource {
           default_type application/json;
-          return 200 '{"resource":"https://${MCP_DOMAIN}","authorization_servers":["${OIDC_ISSUER:-https://${MCP_DOMAIN}}"],"scopes_supported":["sentinelx:exec","sentinelx:edit","sentinelx:state","sentinelx:service","sentinelx:upload","sentinelx:script","sentinelx:capabilities"]}';
+          return 200 '{"resource":"https://${MCP_DOMAIN}","authorization_servers":["${OIDC_ISSUER:-https://${AUTH_DOMAIN:-${MCP_DOMAIN}}}"],"scopes_supported":["openid","sentinelx:exec","sentinelx:edit","sentinelx:state","sentinelx:service","sentinelx:upload","sentinelx:script","sentinelx:capabilities"]}';
       }
   }
 
