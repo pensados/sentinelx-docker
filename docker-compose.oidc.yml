@@ -1,26 +1,31 @@
-# docker-compose.oidc.yml — OIDC override for SentinelX
+# docker-compose.oidc.yml — OIDC override for SentinelX (Keycloak)
 #
-# Adds Zitadel (identity provider) and PostgreSQL to the base stack.
+# Adds Keycloak (identity provider) and PostgreSQL to the base stack.
 # Use with:
 #   docker compose -f docker-compose.yml -f docker-compose.oidc.yml up -d
 #
 # The install.sh script handles this automatically when you choose
 # authentication mode: oidc.
+#
+# Keycloak supports Dynamic Client Registration (DCR) natively,
+# which is required for Claude web/desktop to complete the OAuth flow
+# automatically without the user having to enter a client_id.
+#
+# After first boot, keycloak-setup.py creates the realm, client and
+# scopes automatically via the Keycloak API — no manual UI setup needed.
 
 services:
 
   # ─────────────────────────────────────────────────────────────────
   # sentinelx-mcp override
-  # Replaces the simple-auth MCP with full OIDC validation via Zitadel.
-  # Waits for Zitadel to start (not necessarily healthy — setup handles
-  # the rest once Zitadel is actually ready).
+  # Replaces the simple-auth MCP with full OIDC validation via Keycloak.
   # ─────────────────────────────────────────────────────────────────
   sentinelx-mcp:
     depends_on:
       sentinelx-core:
         condition: service_healthy
-      zitadel:
-        condition: service_started
+      keycloak:
+        condition: service_healthy
     environment:
       MCP_PORT: "8099"
       SENTINELX_URL: "http://127.0.0.1:8091"
@@ -33,175 +38,118 @@ services:
       LOG_DIR: /var/log/sentinelx-mcp
 
   # ─────────────────────────────────────────────────────────────────
-  # zitadel-db — PostgreSQL for Zitadel
+  # keycloak-db — PostgreSQL for Keycloak
   # ─────────────────────────────────────────────────────────────────
-  zitadel-db:
-    image: postgres:17-alpine
-    container_name: zitadel-db
+  keycloak-db:
+    image: postgres:16-alpine
+    container_name: keycloak-db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: zitadel
-      POSTGRES_USER: zitadel
-      POSTGRES_PASSWORD: ${ZITADEL_DB_USER_PASS:?ZITADEL_DB_USER_PASS is required}
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KC_DB_PASSWORD:?KC_DB_PASSWORD is required}
     volumes:
-      - zitadel-db-data:/var/lib/postgresql/data
+      - keycloak-db-data:/var/lib/postgresql/data
     networks:
-      - zitadel-net
+      - keycloak-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U zitadel -d zitadel"]
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
 
   # ─────────────────────────────────────────────────────────────────
-  # zitadel-db-init — one-shot container that cleans stale constraints
+  # keycloak — Identity provider (OIDC/OAuth2)
   #
-  # Zitadel has a known bug where FIRSTINSTANCE setup fails with
-  # "Domain.AlreadyExists" if the setup was interrupted previously.
-  # This container proactively removes those stale constraints from
-  # the eventstore before Zitadel starts, allowing clean initialization.
-  # Exits 0 immediately if the DB is brand new (no constraints yet).
+  # Keycloak supports Dynamic Client Registration (DCR) natively —
+  # Claude and ChatGPT can register themselves automatically without
+  # the user having to enter a client_id.
+  #
+  # Admin console: https://<AUTH_DOMAIN>/admin
+  # Admin user:    admin
+  # Admin pass:    see KC_ADMIN_PASSWORD in .env
   # ─────────────────────────────────────────────────────────────────
-  zitadel-db-init:
-    image: postgres:17-alpine
-    container_name: zitadel-db-init
-    restart: "no"
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.5.6
+    container_name: keycloak
+    restart: unless-stopped
+    command: start
     depends_on:
-      zitadel-db:
+      keycloak-db:
         condition: service_healthy
     environment:
-      PGPASSWORD: ${ZITADEL_DB_USER_PASS}
-    networks:
-      - zitadel-net
-    command: >
-      sh -c "
-        psql -h zitadel-db -U zitadel -d zitadel -c '
-          DELETE FROM eventstore.unique_constraints
-          WHERE unique_type = '"'"'instance_domain'"'"'
-            AND instance_id = '"'"''"'"';
-          DELETE FROM eventstore.unique_constraints
-          WHERE unique_type IN ('"'"'org_name'"'"','"'"'org_domain'"'"','"'"'usernames'"'"')
-            AND instance_id != '"'"''"'"';
-          DELETE FROM eventstore.events2
-          WHERE instance_id != '"'"''"'"'
-            AND aggregate_type IN ('"'"'instance'"'"','"'"'org'"'"','"'"'user'"'"');
-        ' 2>/dev/null || true
-        echo 'DB init complete (stale constraints cleared if any).'
-      "
-
-  # ─────────────────────────────────────────────────────────────────
-  # zitadel — Identity provider (OIDC/OAuth2)
-  #
-  # Configured fully via environment variables on first start.
-  # restart: always is required — Zitadel may fail a few times on first
-  # boot due to a known bug with FIRSTINSTANCE constraint writes.
-  # It always succeeds after a few retries with a clean DB.
-  #
-  # Admin console: https://<AUTH_DOMAIN>/ui/console
-  # Admin user:    admin@sentinelx.<AUTH_DOMAIN>
-  # Admin pass:    see ZITADEL_ADMIN_PASS in .env
-  # ─────────────────────────────────────────────────────────────────
-  zitadel:
-    image: ghcr.io/zitadel/zitadel:latest
-    container_name: zitadel
-    restart: always
-    command: start-from-init --masterkeyFromEnv --tlsMode external
-    user: "0"
-    depends_on:
-      zitadel-db-init:
-        condition: service_completed_successfully
-    environment:
-      # ── Master key ──────────────────────────────────────────────
-      ZITADEL_MASTERKEY: ${ZITADEL_MASTERKEY:?ZITADEL_MASTERKEY is required}
+      # ── Admin credentials ────────────────────────────────────────
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?KC_ADMIN_PASSWORD is required}
 
       # ── Database ────────────────────────────────────────────────
-      ZITADEL_DATABASE_POSTGRES_HOST: zitadel-db
-      ZITADEL_DATABASE_POSTGRES_PORT: "5432"
-      ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
-      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: zitadel
-      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: ${ZITADEL_DB_USER_PASS}
-      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
-      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: zitadel
-      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: ${ZITADEL_DB_USER_PASS}
-      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+      KC_DB: postgres
+      KC_DB_URL_HOST: keycloak-db
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD}
 
-      # ── External access (behind nginx/Caddy reverse proxy) ─────
-      ZITADEL_EXTERNALDOMAIN: ${AUTH_DOMAIN:?AUTH_DOMAIN is required in oidc mode}
-      ZITADEL_EXTERNALSECURE: "true"
-      ZITADEL_EXTERNALPORT: "443"
-      ZITADEL_TLS_ENABLED: "false"   # TLS terminated by reverse proxy
+      # ── External access (behind nginx/Caddy reverse proxy) ──────
+      KC_HOSTNAME: https://${AUTH_DOMAIN:?AUTH_DOMAIN is required in oidc mode}
+      KC_HOSTNAME_STRICT: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
 
-      # Use built-in login UI v1 (v2 requires a separate container we don't run)
-      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "false"
-
-      # ── First instance bootstrap (runs only on first start) ────
-      ZITADEL_FIRSTINSTANCE_ORG_NAME: SentinelX
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${ZITADEL_ADMIN_PASS:?ZITADEL_ADMIN_PASS is required}
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "false"
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL: admin@sentinelx.local
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAILVERIFIED: "true"
-
-      # Write a PAT for the setup machine user on first init.
-      # zitadel-setup.py reads this file directly — no JWT exchange needed.
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: sentinelx-setup
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: SentinelX Setup Bot
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE: "2030-01-01T00:00:00Z"
-      ZITADEL_FIRSTINSTANCE_PATPATH: /zitadel-data/setup.pat
+      # ── Health + metrics ─────────────────────────────────────────
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
 
     ports:
       - "127.0.0.1:8080:8080"
 
-    volumes:
-      - zitadel-data:/zitadel-data
     networks:
-      - zitadel-net
+      - keycloak-net
       - sentinelx-net
 
     healthcheck:
-      test: ["CMD", "/app/zitadel", "ready"]
-      interval: 10s
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health/ready || exit 1"]
+      interval: 15s
       timeout: 5s
-      retries: 20
+      retries: 10
       start_period: 60s
 
   # ─────────────────────────────────────────────────────────────────
-  # zitadel-setup — one-shot container that runs after Zitadel is healthy
+  # keycloak-setup — one-shot container that runs after Keycloak boots
   #
-  # Uses the Zitadel API to:
-  #   1. Read the PAT written by Zitadel on first init
-  #   2. Create the sentinelx-mcp OIDC client with all redirect URIs
-  #   3. Create all sentinelx:* custom scopes
-  #   4. Patch /install/.env with OIDC_ISSUER, OIDC_JWKS_URI, CLIENT_ID
+  # Uses the Keycloak Admin REST API to:
+  #   1. Create the sentinelx realm
+  #   2. Create all sentinelx:* client scopes
+  #   3. Create the sentinelx-mcp OIDC client with DCR-friendly config
+  #   4. Enable open DCR so Claude/ChatGPT register automatically
+  #   5. Patch /install/.env with OIDC_ISSUER, OIDC_JWKS_URI, CLIENT_ID
   #
-  # Exits 0 on success. Run: docker compose logs zitadel-setup to debug.
+  # Exits 0 on success. Run: docker compose logs keycloak-setup to debug.
   # ─────────────────────────────────────────────────────────────────
-  zitadel-setup:
+  keycloak-setup:
     image: python:3.12-slim
-    container_name: zitadel-setup
+    container_name: keycloak-setup
     restart: "no"
     depends_on:
-      zitadel:
+      keycloak:
         condition: service_healthy
     environment:
       AUTH_DOMAIN: ${AUTH_DOMAIN}
+      KC_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD}
       RESOURCE_URL: ${RESOURCE_URL:-https://sentinelx.example.com}
       INSTALL_DIR: /install
     volumes:
-      - zitadel-data:/zitadel-data:ro
       - .:/install
-      - ./scripts/zitadel-setup.py:/setup.py:ro
+      - ./scripts/keycloak-setup.py:/setup.py:ro
     networks:
-      - zitadel-net
+      - keycloak-net
     command: python3 /setup.py
 
 networks:
   sentinelx-net:
     driver: bridge
-  zitadel-net:
+  keycloak-net:
     driver: bridge
 
 volumes:
-  zitadel-db-data:
-  zitadel-data:
+  keycloak-db-data:

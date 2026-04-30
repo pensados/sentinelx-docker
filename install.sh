@@ -312,23 +312,10 @@ else
     SENTINEL_TOKEN=$(openssl rand -hex 32)
 
     if [ "$AUTH_MODE" = "oidc" ]; then
-        # set +o pipefail temporarily: tr+head combo triggers SIGPIPE by design
-        set +o pipefail
-        ZITADEL_MASTERKEY=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 32; echo)
-        ZITADEL_DB_ADMIN_PASS=$(openssl rand -hex 16)
-        ZITADEL_DB_USER_PASS=$(openssl rand -hex 16)
-        ZITADEL_ADMIN_PASS=$(python3 -c "
-import secrets, string
-chars = string.ascii_letters + string.digits + '!@#\$%^&*'
-while True:
-    pwd = ''.join(secrets.choice(chars) for _ in range(16))
-    if (any(c.isupper() for c in pwd) and any(c.islower() for c in pwd)
-            and any(c.isdigit() for c in pwd) and any(c in '!@#\$%^&*' for c in pwd)):
-        print(pwd); break
-")
-        set -o pipefail
-        OIDC_ISSUER="https://${AUTH_DOMAIN}"
-        OIDC_JWKS_URI="https://${AUTH_DOMAIN}/oauth/v2/keys"
+        KC_DB_PASSWORD=$(openssl rand -hex 16)
+        KC_ADMIN_PASSWORD=$(openssl rand -hex 12)
+        OIDC_ISSUER="https://${AUTH_DOMAIN}/realms/sentinelx"
+        OIDC_JWKS_URI="https://${AUTH_DOMAIN}/realms/sentinelx/protocol/openid-connect/certs"
     fi
 
     cat > .env <<EOF
@@ -354,12 +341,10 @@ OIDC_JWKS_URI=${OIDC_JWKS_URI}
 OIDC_EXPECTED_AUDIENCE=
 AUTH_DEBUG=false
 
-# ── Zitadel ───────────────────────────────────────────────────────────────────
+# ── Keycloak ──────────────────────────────────────────────────────────────────
 AUTH_DOMAIN=${AUTH_DOMAIN}
-ZITADEL_MASTERKEY=${ZITADEL_MASTERKEY}
-ZITADEL_DB_ADMIN_PASS=${ZITADEL_DB_ADMIN_PASS}
-ZITADEL_DB_USER_PASS=${ZITADEL_DB_USER_PASS}
-ZITADEL_ADMIN_PASS=${ZITADEL_ADMIN_PASS}
+KC_DB_PASSWORD=${KC_DB_PASSWORD}
+KC_ADMIN_PASSWORD=${KC_ADMIN_PASSWORD}
 EOF
     else
         cat >> .env <<EOF
@@ -447,8 +432,7 @@ fi
 section "Step 6/6 — Reverse proxy configuration"
 
 MCP_PORT="8099"
-AUTH_ZITADEL_API_PORT="8080"
-AUTH_ZITADEL_LOGIN_PORT="3000"
+AUTH_KC_PORT="8080"
 
 echo ""
 echo -e "  ${BOLD}SentinelX MCP is running on localhost:${MCP_PORT}${NC}"
@@ -515,10 +499,10 @@ cat << CADDY_EOF
 
 CADDY_EOF
 
-# Zitadel auth domain block (OIDC mode only)
+# Keycloak auth domain block (OIDC mode only)
 if [ "$AUTH_MODE" = "oidc" ] && [ -n "${AUTH_DOMAIN:-}" ]; then
-    echo -e "  ${BOLD}── nginx (Zitadel auth — ${AUTH_DOMAIN}) ─────────────────────${NC}"
-    cat << ZITADEL_NGINX_EOF
+    echo -e "  ${BOLD}── nginx (Keycloak auth — ${AUTH_DOMAIN}) ──────────────────────${NC}"
+    cat << KC_NGINX_EOF
 
   server {
       listen 443 ssl http2;
@@ -527,25 +511,18 @@ if [ "$AUTH_MODE" = "oidc" ] && [ -n "${AUTH_DOMAIN:-}" ]; then
       ssl_certificate     /path/to/fullchain.pem;
       ssl_certificate_key /path/to/privkey.pem;
 
-      # Zitadel Login UI
-      location /ui/v2/login {
-          proxy_pass http://127.0.0.1:${AUTH_ZITADEL_LOGIN_PORT};
-          proxy_http_version 1.1;
-          proxy_set_header Host \$host;
-          proxy_set_header X-Forwarded-Proto https;
-      }
-
-      # Zitadel API (gRPC + REST)
       location / {
-          grpc_pass grpc://127.0.0.1:${AUTH_ZITADEL_API_PORT};
-          proxy_pass http://127.0.0.1:${AUTH_ZITADEL_API_PORT};
+          proxy_pass http://127.0.0.1:${AUTH_KC_PORT};
           proxy_http_version 1.1;
           proxy_set_header Host \$host;
           proxy_set_header X-Forwarded-Proto https;
+          proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+          proxy_read_timeout 3600s;
+          proxy_buffering off;
       }
   }
 
-ZITADEL_NGINX_EOF
+KC_NGINX_EOF
 fi
 
 # ── Final instructions ────────────────────────────────────────────────────────
@@ -561,8 +538,8 @@ echo "    3. Paste this URL: ${MCP_URL}/mcp"
 if [ "$AUTH_MODE" = "simple" ]; then
     echo "    4. When prompted for a token, use: ${SENTINEL_TOKEN:-<your token from .env>}"
 else
-    echo "    4. You'll be redirected to Zitadel to log in."
-    echo "       Admin credentials are in .env (ZITADEL_ADMIN_PASS)"
+    echo "    4. You'll be redirected to Keycloak to log in."
+    echo "       Admin credentials are in .env (KC_ADMIN_PASSWORD)"
 fi
 echo ""
 echo -e "  ${BOLD}Connect ChatGPT${NC}"
