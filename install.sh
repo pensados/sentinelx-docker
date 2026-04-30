@@ -13,12 +13,12 @@ set -euo pipefail
 # ── curl | bash self-re-exec fix ──────────────────────────────────────────────
 # When piped through bash (curl ... | bash), stdin is the pipe carrying the
 # script itself — not the terminal. This breaks all interactive prompts.
-# Solution: save the script to a temp file and re-exec it with a real terminal.
+# Solution: save the script to a temp file and re-exec it reading from /dev/tty.
 if [ ! -t 0 ]; then
     _tmp="$(mktemp /tmp/sentinelx-install-XXXXXX.sh)"
-    cat > "$_tmp"                  # drain the rest of stdin (the script) into file
+    cat > "$_tmp"                  # drain stdin (the script) into file
     chmod +x "$_tmp"
-    exec bash "$_tmp" "$@"         # re-exec with terminal stdin; curl pipe is gone
+    exec bash "$_tmp" "$@" < /dev/tty   # re-exec with terminal as stdin
 fi
 
 # ── Colors & helpers ─────────────────────────────────────────────────────────
