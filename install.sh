@@ -438,7 +438,7 @@ printf "  %-22s %s\n" "Execution mode:"   "${EXEC_MODE}"
 printf "  %-22s %s\n" "Authentication:"   "${AUTH_MODE}"
 printf "  %-22s %s\n" "MCP endpoint:"     "${MCP_URL}/mcp"
 if [ "$AUTH_MODE" = "oidc" ] && [ -n "${AUTH_DOMAIN:-}" ]; then
-    printf "  %-22s %s\n" "Auth (Zitadel):"   "https://${AUTH_DOMAIN}"
+    printf "  %-22s %s\n" "Auth (Keycloak):"   "https://${AUTH_DOMAIN}"
 fi
 echo ""
 echo -e "  ${YELLOW}Connect Claude at:${NC}  claude.ai → Settings → Integrations"
@@ -476,7 +476,7 @@ fi
 
 info "Building images..."
 cd "$INSTALL_DIR" && env -i HOME="$HOME" PATH="$PATH" \
-    eval "${COMPOSE_CMD}" up -d --build
+    bash -c "${COMPOSE_CMD} up -d --build"
 
 info "Waiting for health checks..."
 sleep 8
