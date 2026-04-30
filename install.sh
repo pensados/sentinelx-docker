@@ -474,7 +474,7 @@ if [ "$AUTH_MODE" = "oidc" ] && [ -n "${AUTH_DOMAIN:-}" ]; then
     printf "  %-22s %s\n" "Auth (Keycloak):"   "https://${AUTH_DOMAIN}"
 fi
 echo ""
-echo -e "  ${YELLOW}Connect Claude at:${NC}  claude.ai → Settings → Integrations"
+echo -e "  ${YELLOW}Connect Claude at:${NC}  claude.ai → Settings → Connectors → Add custom connector"
 echo -e "             URL:    ${BOLD}${MCP_URL}/mcp${NC}"
 echo ""
 
@@ -633,30 +633,65 @@ section "You're ready!"
 echo ""
 box "Your MCP endpoint:  ${MCP_URL}/mcp"
 echo ""
-echo -e "  ${BOLD}Connect Claude${NC}"
-echo "    1. Go to claude.ai → Settings → Integrations"
-echo "    2. Click 'Add custom connector'"
-echo "    3. Paste this URL: ${MCP_URL}/mcp"
+
 if [ "$AUTH_MODE" = "simple" ]; then
-    echo "    4. When prompted for a token, use: ${SENTINEL_TOKEN:-<your token from .env>}"
-else
-    echo "    4. You'll be redirected to Keycloak to log in."
-    echo "       Admin credentials are in .env (KC_ADMIN_PASSWORD)"
+    echo -e "  ${BOLD}── Add to Claude ────────────────────────────────────────────${NC}"
     echo ""
-    echo "  OAuth credentials for Claude / ChatGPT connector:"
-    echo "  (Run after keycloak-setup finishes — check .env or docker logs keycloak-setup)"
-    echo "    OAuth Client ID:     sentinelx-mcp"
-    echo "    OAuth Client Secret: (see OIDC_CLIENT_SECRET in .env after setup)"
+    echo "  1. Go to claude.ai → Settings → Connectors → Add custom connector"
+    echo "  2. Name:   SentinelX"
+    echo "  3. URL:    ${MCP_URL}/mcp"
+    echo "  4. Token:  ${SENTINEL_TOKEN:-<your token from .env>}"
+    echo ""
+    echo -e "  ${BOLD}── Add to ChatGPT ───────────────────────────────────────────${NC}"
+    echo ""
+    echo "  1. Go to chatgpt.com → Settings → Connected apps → Add"
+    echo "  2. URL:    ${MCP_URL}/mcp"
+    echo "  3. Token:  ${SENTINEL_TOKEN:-<your token from .env>}"
+    echo ""
+else
+    # Read client secret from .env (written by keycloak-setup)
+    _client_secret="${OIDC_CLIENT_SECRET:-}"
+    _kc_pass="${KC_ADMIN_PASSWORD:-}"
+    if [ -z "$_client_secret" ] && [ -f "${INSTALL_DIR}/.env" ]; then
+        _client_secret=$(grep '^OIDC_CLIENT_SECRET=' "${INSTALL_DIR}/.env" 2>/dev/null | cut -d= -f2)
+    fi
+    if [ -z "$_kc_pass" ] && [ -f "${INSTALL_DIR}/.env" ]; then
+        _kc_pass=$(grep '^KC_ADMIN_PASSWORD=' "${INSTALL_DIR}/.env" 2>/dev/null | cut -d= -f2)
+    fi
+
+    echo -e "  ${BOLD}── Add to Claude ────────────────────────────────────────────${NC}"
+    echo ""
+    echo "  1. Go to claude.ai → Settings → Connectors → Add custom connector"
+    echo "  2. Name:              SentinelX"
+    echo "  3. URL:               ${MCP_URL}/mcp"
+    echo "  4. Advanced settings → OAuth:"
+    echo "       OAuth Client ID:     sentinelx-mcp"
+    echo "       OAuth Client Secret: ${_client_secret:-<see OIDC_CLIENT_SECRET in .env>}"
+    echo "  5. Log in with:       admin / ${_kc_pass:-<see KC_ADMIN_PASSWORD in .env>}"
+    echo ""
+    echo -e "  ${BOLD}── Add to ChatGPT ───────────────────────────────────────────${NC}"
+    echo ""
+    echo "  1. Go to chatgpt.com → Settings → Connected apps → Add"
+    echo "  2. URL:               ${MCP_URL}/mcp"
+    echo "  3. OAuth Client ID:   sentinelx-mcp"
+    echo "  4. OAuth Client Secret: ${_client_secret:-<see OIDC_CLIENT_SECRET in .env>}"
+    echo "  5. Log in with:       admin / ${_kc_pass:-<see KC_ADMIN_PASSWORD in .env>}"
+    echo ""
+    echo -e "  ${BOLD}── Keycloak admin console ───────────────────────────────────${NC}"
+    echo ""
+    echo "  URL:      https://${AUTH_DOMAIN}/admin"
+    echo "  Username: admin"
+    echo "  Password: ${_kc_pass:-<see KC_ADMIN_PASSWORD in .env>}"
+    echo ""
 fi
+
+echo -e "  ${BOLD}── Useful commands ──────────────────────────────────────────${NC}"
 echo ""
-echo -e "  ${BOLD}Connect ChatGPT${NC}"
-echo "    1. Go to chatgpt.com → Settings → Connected apps → Add"
-echo "    2. Paste the same URL: ${MCP_URL}/mcp"
-echo ""
-echo -e "  ${BOLD}Useful commands${NC}"
 echo "    Check status:   cd ${INSTALL_DIR} && ${COMPOSE_CMD} ps"
 echo "    View logs:      cd ${INSTALL_DIR} && ${COMPOSE_CMD} logs -f"
 echo "    Stop:           cd ${INSTALL_DIR} && ${COMPOSE_CMD} down"
 echo "    Restart:        cd ${INSTALL_DIR} && ${COMPOSE_CMD} restart"
+echo "    Uninstall:      bash ${INSTALL_DIR}/install.sh --uninstall"
 echo ""
 info "Installation complete."
+
