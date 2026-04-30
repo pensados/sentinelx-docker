@@ -18,7 +18,6 @@ services:
     build:
       context: .
       dockerfile: core/Dockerfile
-    container_name: sentinelx-core
     restart: unless-stopped
 
     # Required only when SENTINEL_EXEC_MODE=host.
@@ -73,7 +72,6 @@ services:
     build:
       context: .
       dockerfile: mcp/Dockerfile
-    container_name: sentinelx-mcp
     restart: unless-stopped
     depends_on:
       sentinelx-core:
