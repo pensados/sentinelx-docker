@@ -26,6 +26,14 @@ box()     { echo -e "${CYAN}┌────────────────�
             echo -e "${CYAN}│${NC}  $*"
             echo -e "${CYAN}└─────────────────────────────────────────────┘${NC}"; }
 
+# ── stdin fix for curl | bash ────────────────────────────────────────────────
+# When run via `curl ... | bash`, stdin is the pipe (script source), not the
+# terminal. `read` would get EOF immediately and default to option 1 for every
+# question. We reopen stdin from /dev/tty so interactive prompts work correctly.
+if [ ! -t 0 ] && [ -e /dev/tty ]; then
+    exec < /dev/tty
+fi
+
 REPO_URL="https://github.com/pensados/sentinelx-docker"
 INSTALL_DIR="${SENTINELX_DIR:-$HOME/sentinelx-docker}"
 DRY_RUN=0
