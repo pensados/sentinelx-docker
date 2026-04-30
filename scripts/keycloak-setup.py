@@ -229,16 +229,26 @@ def main() -> None:
     print(f"  Client UUID: {client_uuid}", flush=True)
 
     # 5. Assign scopes to the client as optional scopes
+    # Also assign offline_access (needed for Claude refresh tokens)
     print("Assigning sentinelx:* scopes to client...", flush=True)
+    all_scopes_resp = api("GET", f"/admin/realms/{REALM}/client-scopes", token)
+    all_scope_map = {s["name"]: s["id"] for s in all_scopes_resp}
+    # offline_access is a built-in scope needed for refresh tokens
+    if "offline_access" not in scope_ids:
+        oa_id = all_scope_map.get("offline_access")
+        if oa_id:
+            scope_ids["offline_access"] = oa_id
+
     for scope_name, scope_id in scope_ids.items():
         try:
-            api("POST",
+            # Keycloak uses PUT for assigning optional scopes (not POST)
+            api("PUT",
                 f"/admin/realms/{REALM}/clients/{client_uuid}/optional-client-scopes/{scope_id}",
                 token)
             print(f"  Assigned scope: {scope_name}", flush=True)
         except RuntimeError as e:
-            if "409" in str(e) or "already" in str(e).lower():
-                pass  # already assigned
+            if "409" in str(e) or "already" in str(e).lower() or "204" in str(e):
+                print(f"  Scope already assigned: {scope_name}", flush=True)
             else:
                 print(f"  Warning assigning {scope_name}: {e}", flush=True)
 
