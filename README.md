@@ -12,6 +12,271 @@ Lets Claude, ChatGPT and other AI clients manage your server via the **Model Con
 curl -fsSL https://raw.githubusercontent.com/pensados/sentinelx-docker/main/install.sh | bash
 ```
 
+The interactive installer asks 3 questions (exec mode, auth mode, domain) and handles everything else: clones the repo, generates secrets, writes `.env`, starts the stack, and prints the exact credentials to paste into Claude or ChatGPT.
+
+### Headless / CI install
+
+```bash
+SX_YES=1 \
+SX_EXEC_MODE=host \
+SX_AUTH_MODE=oidc \
+SX_DOMAIN_MODE=manual \
+SX_BASE_DOMAIN=yourdomain.com \
+  bash install.sh
+```
+
+| Variable | Values | Description |
+|---|---|---|
+| `SX_EXEC_MODE` | `host` / `container` | How commands run (see below) |
+| `SX_AUTH_MODE` | `simple` / `oidc` | Authentication mode |
+| `SX_DOMAIN_MODE` | `sslip` / `manual` / `cloudflare` | Domain setup |
+| `SX_BASE_DOMAIN` | `yourdomain.com` | Required for `manual` and `cloudflare` |
+| `SX_YES` | `1` | Skip all confirmations |
+| `SX_SKIP_DNS_WAIT` | `1` | Skip DNS propagation wait |
+
+Add `--dry-run` to generate `.env` without starting containers.
+
+---
+
+## Uninstall
+
+```bash
+bash ~/sentinelx-docker/install.sh --uninstall
+```
+
+Stops all containers, removes volumes, and deletes the install directory. Prints the DNS records and nginx blocks you need to clean up manually.
+
+```bash
+# Skip confirmation prompt
+SX_YES=1 bash ~/sentinelx-docker/install.sh --uninstall
+```
+
+---
+
+## Multiple instances on the same server
+
+You can run multiple independent SentinelX stacks on the same host. Each instance needs its own install directory, domain/subdomain, and will automatically pick free ports.
+
+```bash
+# First instance (default location)
+curl -fsSL https://raw.githubusercontent.com/pensados/sentinelx-docker/main/install.sh | bash
+# → installs to ~/sentinelx-docker, auto-detects free ports
+
+# Second instance
+SENTINELX_DIR=~/sentinelx2 \
+  curl -fsSL https://raw.githubusercontent.com/pensados/sentinelx-docker/main/install.sh | bash
+# → installs to ~/sentinelx2, picks next available ports
+```
+
+Each instance gets its own:
+- Docker volumes and networks (prefixed by directory name)
+- Auto-detected ports — no conflicts with existing services
+- Independent `.env`, secrets and Keycloak realm
+- nginx server block (printed at the end of install)
+
+To uninstall a specific instance:
+
+```bash
+SENTINELX_DIR=~/sentinelx2 SX_YES=1 bash ~/sentinelx2/install.sh --uninstall
+```
+
+---
+
+## Authentication modes
+
+### Simple auth (`SX_AUTH_MODE=simple`)
+
+A shared secret token is set in the connector config. Fast to set up, good for personal use.
+
+**Stack:** 2 containers — `sentinelx-core` + `sentinelx-mcp`
+
+**Connect to Claude:** `claude.ai → Settings → Connectors → Add custom connector`
+- URL: `https://sentinelx.yourdomain.com/mcp`
+- Token: printed at the end of install (also in `.env` as `SENTINEL_TOKEN`)
+
+### OIDC auth (`SX_AUTH_MODE=oidc`)
+
+Full OAuth2/OIDC via **Keycloak** (bundled in the stack). Users log in with username + password. Supports multiple users, scopes, and audit logs. Required for Claude web / ChatGPT automatic OAuth flow.
+
+**Stack:** 4 containers — `sentinelx-core` + `sentinelx-mcp` + `keycloak` + `keycloak-db`
+
+After the stack starts, `keycloak-setup` runs automatically. At the end of the install you'll see everything you need:
+
+```
+── Add to Claude ────────────────────────────────────────────
+  1. Go to claude.ai → Settings → Connectors → Add custom connector
+  2. Name:              SentinelX
+  3. URL:               https://sentinelx.yourdomain.com/mcp
+  4. Advanced settings → OAuth:
+       OAuth Client ID:     sentinelx-mcp
+       OAuth Client Secret: <generated>
+  5. Log in with:       admin / <generated>
+
+── Add to ChatGPT ───────────────────────────────────────────
+  1. Go to chatgpt.com → Settings → Connected apps → Add
+  2. URL:               https://sentinelx.yourdomain.com/mcp
+  3. OAuth Client ID:   sentinelx-mcp
+  4. OAuth Client Secret: <generated>
+  5. Log in with:       admin / <generated>
+
+── Keycloak admin console ───────────────────────────────────
+  URL:      https://auth.yourdomain.com/admin
+  Username: admin
+  Password: <generated>
+```
+
+The credentials are also written to `.env` as `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` and `KC_ADMIN_PASSWORD`.
+
+> **Cloudflare users:** the auth subdomain (`auth.yourdomain.com`) must be set to **proxied=false** (grey cloud / DNS only) in Cloudflare. Cloudflare's Bot Fight Mode blocks OAuth requests without a browser User-Agent, which breaks the Claude/ChatGPT login flow.
+
+---
+
+## Execution modes
+
+### Host mode (`SX_EXEC_MODE=host`) — recommended
+
+`sentinelx-core` runs with `pid: host` and `privileged: true`. Every command is executed via `nsenter` entering PID 1's namespaces — same filesystem, same network, same services as the host. The agent behaves identically to running natively.
+
+### Container mode (`SX_EXEC_MODE=container`)
+
+Commands run inside an isolated container. No host access. Good for development or sandboxed environments. The allowlist is not enforced in this mode — Docker is the security boundary.
+
+---
+
+## Architecture
+
+```
+Claude / ChatGPT (MCP client)
+  │
+  │  HTTPS  /mcp
+  ▼
+[nginx / Caddy — TLS termination]
+  │
+  │  HTTP  :8099
+  ▼
+sentinelx-mcp  🐳  (OIDC validation, tool proxy)
+  │
+  │  HTTP  :8091 (internal)
+  ▼
+sentinelx-core  🐳  (host mode: pid=host, privileged=true)
+  │
+  │  nsenter --target 1 --mount --uts --ipc --net --pid
+  ▼
+Host system  (filesystem, systemd, docker, network)
+
+─── OIDC mode only ──────────────────────────────────────
+  │
+  ▼
+keycloak  🐳  (:8080 internal)  ←  keycloak-db  🐳
+  │
+  │  HTTPS  auth.yourdomain.com  (proxied=false in Cloudflare)
+  ▼
+[nginx / Caddy — TLS termination]
+```
+
+---
+
+## Requirements
+
+- Docker Engine 20.10+
+- Docker Compose v2
+- Linux host (host mode requires Linux PID namespaces)
+- A domain with DNS pointing to your server (for OIDC mode)
+- nginx or Caddy for TLS termination (install.sh prints the config blocks)
+
+---
+
+## Manual setup
+
+```bash
+git clone --recurse-submodules https://github.com/pensados/sentinelx-docker
+cd sentinelx-docker
+cp .env.example .env
+# Edit .env — set SENTINEL_TOKEN and auth variables
+docker compose up -d --build                                                    # simple auth
+docker compose -f docker-compose.yml -f docker-compose.oidc.yml up -d --build  # OIDC
+```
+
+---
+
+## Configuration reference
+
+| Variable | Description |
+|---|---|
+| `SENTINEL_TOKEN` | Internal token between MCP and core |
+| `SENTINEL_EXEC_MODE` | `host` or `container` |
+| `CORE_PORT` | Port for sentinelx-core (auto-detected, default 8091) |
+| `MCP_PORT` | Port for sentinelx-mcp (auto-detected, default 8099) |
+| `OIDC_ISSUER` | OIDC issuer URL (set by keycloak-setup) |
+| `OIDC_JWKS_URI` | JWKS endpoint for token validation (set by keycloak-setup) |
+| `OIDC_CLIENT_ID` | OAuth client ID (set by keycloak-setup) |
+| `OIDC_CLIENT_SECRET` | OAuth client secret (set by keycloak-setup) |
+| `RESOURCE_URL` | Public HTTPS URL of this MCP endpoint |
+| `AUTH_DOMAIN` | Subdomain for Keycloak (OIDC mode only) |
+| `KC_ADMIN_PASSWORD` | Keycloak admin password (OIDC mode only) |
+| `KC_DB_PASSWORD` | Keycloak DB password (OIDC mode only) |
+| `KC_PORT` | Port for Keycloak (auto-detected, default 8180) |
+
+---
+
+## Security model
+
+`privileged: true` gives the container full access to the host. This is intentional — SentinelX is a trusted agent for infrastructure management.
+
+Security layers:
+
+1. **Command allowlist** — `core/agent_docker.py` defines which commands the agent can run
+2. **OIDC/OAuth** — only authenticated users with valid tokens and correct scopes reach the agent
+3. **Network** — core and MCP ports are bound to `127.0.0.1` only; external access only via TLS reverse proxy
+
+---
+
+## Operations
+
+```bash
+# Check status
+cd ~/sentinelx-docker && docker compose -f docker-compose.yml -f docker-compose.oidc.yml ps
+
+# View logs
+docker compose -f docker-compose.yml -f docker-compose.oidc.yml logs -f
+
+# Restart MCP only
+docker compose -f docker-compose.yml -f docker-compose.oidc.yml restart sentinelx-mcp
+
+# Stop (keeps volumes)
+docker compose -f docker-compose.yml -f docker-compose.oidc.yml down
+
+# Uninstall (removes everything)
+bash ~/sentinelx-docker/install.sh --uninstall
+
+# Update to latest version
+git pull --recurse-submodules
+docker compose -f docker-compose.yml -f docker-compose.oidc.yml up -d --build
+```
+
+---
+
+## Related projects
+
+- [sentinelx-core](https://github.com/pensados/sentinelx-core) — the agent
+- [sentinelx-core-mcp](https://github.com/pensados/sentinelx-core-mcp) — the MCP server
+
+## License
+
+MIT
+
+Docker deployment stack for [SentinelX Core](https://github.com/pensados/sentinelx-core) + [SentinelX Core MCP](https://github.com/pensados/sentinelx-core-mcp).
+
+Lets Claude, ChatGPT and other AI clients manage your server via the **Model Context Protocol (MCP)** — execute commands, edit files, restart services, monitor state — all from the AI chat interface.
+
+---
+
+## Quick install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pensados/sentinelx-docker/main/install.sh | bash
+```
+
 The interactive installer asks 3 questions (exec mode, auth mode, domain) and handles everything else: clones the repo, generates secrets, writes `.env`, and starts the stack.
 
 ### Headless / CI install
