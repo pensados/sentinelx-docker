@@ -1,0 +1,167 @@
+# docker-compose.oidc.yml — OIDC override for SentinelX
+#
+# Adds Zitadel (identity provider) and PostgreSQL to the base stack.
+# Use with:
+#   docker compose -f docker-compose.yml -f docker-compose.oidc.yml up -d
+#
+# The install.sh script handles this automatically when you choose
+# authentication mode: oidc.
+#
+# Zitadel is configured fully via environment variables on first start.
+# No manual UI setup required — the install.sh script calls zitadel-setup.sh
+# after first boot to create the MCP client and scopes automatically.
+
+services:
+
+  # ─────────────────────────────────────────────────────────────────
+  # sentinelx-mcp override
+  # Replaces the simple-auth MCP with full OIDC validation via Zitadel.
+  # ─────────────────────────────────────────────────────────────────
+  sentinelx-mcp:
+    depends_on:
+      sentinelx-core:
+        condition: service_healthy
+      zitadel:
+        condition: service_healthy
+    environment:
+      MCP_PORT: "8099"
+      SENTINELX_URL: "http://127.0.0.1:8091"
+      SENTINEL_TOKEN: ${SENTINEL_TOKEN}
+      OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER is required in oidc mode — run install.sh}
+      OIDC_JWKS_URI: ${OIDC_JWKS_URI:?OIDC_JWKS_URI is required in oidc mode}
+      OIDC_EXPECTED_AUDIENCE: ${OIDC_EXPECTED_AUDIENCE:-}
+      RESOURCE_URL: ${RESOURCE_URL:-https://sentinelx.example.com}
+      AUTH_DEBUG: ${AUTH_DEBUG:-false}
+      LOG_DIR: /var/log/sentinelx-mcp
+
+  # ─────────────────────────────────────────────────────────────────
+  # zitadel-db — PostgreSQL for Zitadel
+  # ─────────────────────────────────────────────────────────────────
+  zitadel-db:
+    image: postgres:17-alpine
+    container_name: zitadel-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: zitadel
+      POSTGRES_USER: zitadel
+      POSTGRES_PASSWORD: ${ZITADEL_DB_USER_PASS:?ZITADEL_DB_USER_PASS is required}
+    volumes:
+      - zitadel-db-data:/var/lib/postgresql/data
+    networks:
+      - zitadel-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zitadel -d zitadel"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ─────────────────────────────────────────────────────────────────
+  # zitadel — Identity provider (OIDC/OAuth2)
+  #
+  # Configured fully via environment variables on first start.
+  # ZITADEL_FIRSTINSTANCE_* vars run only once — on initial DB setup.
+  # After that, use the admin console or API to make changes.
+  #
+  # Admin console: https://<AUTH_DOMAIN>/ui/console
+  # Default admin: admin@sentinelx.<AUTH_DOMAIN>
+  # Default pass:  see ZITADEL_ADMIN_PASS in .env
+  # ─────────────────────────────────────────────────────────────────
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:latest
+    container_name: zitadel
+    restart: unless-stopped
+    command: start-from-init --masterkeyFromEnv --tlsMode external
+    depends_on:
+      zitadel-db:
+        condition: service_healthy
+    environment:
+      # ── Master key ──────────────────────────────────────────────
+      ZITADEL_MASTERKEY: ${ZITADEL_MASTERKEY:?ZITADEL_MASTERKEY is required}
+
+      # ── Database ────────────────────────────────────────────────
+      ZITADEL_DATABASE_POSTGRES_HOST: zitadel-db
+      ZITADEL_DATABASE_POSTGRES_PORT: "5432"
+      ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: ${ZITADEL_DB_USER_PASS}
+      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
+      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: zitadel
+      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: ${ZITADEL_DB_USER_PASS}
+      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+
+      # ── External access (behind nginx reverse proxy) ──────────
+      ZITADEL_EXTERNALDOMAIN: ${AUTH_DOMAIN:?AUTH_DOMAIN is required in oidc mode}
+      ZITADEL_EXTERNALSECURE: "true"
+      ZITADEL_EXTERNALPORT: "443"
+      ZITADEL_TLS_ENABLED: "false"   # TLS terminated by nginx
+
+      # ── First instance bootstrap (runs only on first start) ───
+      ZITADEL_FIRSTINSTANCE_ORG_NAME: SentinelX
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${ZITADEL_ADMIN_PASS:?ZITADEL_ADMIN_PASS is required}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "false"
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL: admin@sentinelx.local
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAILVERIFIED: "true"
+
+      # Write a service account PAT to this file on first init.
+      # Used by zitadel-setup.sh to configure the MCP client automatically.
+      ZITADEL_FIRSTINSTANCE_MACHINEKEYPATH: /zitadel-data/service-account.json
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_USERNAME: sentinelx-setup
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_NAME: SentinelX Setup Bot
+
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    volumes:
+      - zitadel-data:/zitadel-data
+    networks:
+      - zitadel-net
+      - sentinelx-net
+
+    healthcheck:
+      test: ["CMD", "/app/zitadel", "ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ─────────────────────────────────────────────────────────────────
+  # zitadel-setup — one-shot container that runs after Zitadel boots
+  #
+  # Uses the Zitadel API to:
+  #   1. Create the sentinelx-mcp OIDC client
+  #   2. Create all required sentinelx:* scopes
+  #   3. Write OIDC_ISSUER and OIDC_JWKS_URI back to .env
+  #
+  # Exits 0 on success. Check logs if the MCP fails to validate tokens.
+  # ─────────────────────────────────────────────────────────────────
+  zitadel-setup:
+    image: python:3.12-slim
+    container_name: zitadel-setup
+    restart: "no"
+    depends_on:
+      zitadel:
+        condition: service_healthy
+    environment:
+      AUTH_DOMAIN: ${AUTH_DOMAIN}
+      RESOURCE_URL: ${RESOURCE_URL:-https://sentinelx.example.com}
+      ZITADEL_ADMIN_PASS: ${ZITADEL_ADMIN_PASS}
+      INSTALL_DIR: /install
+    volumes:
+      - zitadel-data:/zitadel-data:ro
+      - .:/install
+      - ./scripts/zitadel-setup.py:/setup.py:ro
+    networks:
+      - zitadel-net
+    command: python3 /setup.py
+
+networks:
+  sentinelx-net:
+    driver: bridge
+  zitadel-net:
+    driver: bridge
+
+volumes:
+  zitadel-db-data:
+  zitadel-data:

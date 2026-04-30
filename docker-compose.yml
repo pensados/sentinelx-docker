@@ -3,15 +3,16 @@ services:
   # ─────────────────────────────────────────────────────────────────
   # sentinelx-core
   #
-  # SENTINEL_EXEC_MODE controla dónde corren los comandos:
+  # SENTINEL_EXEC_MODE controls where commands are executed:
   #
-  #   host  (default) — nsenter al host real.
-  #                     Requiere pid=host + privileged=true (abajo).
-  #                     Acceso total al filesystem, systemd, red del host.
+  #   host  (default) — via nsenter into the host's PID namespace.
+  #                     Requires pid=host + privileged=true below.
+  #                     Full access to the host filesystem, systemd,
+  #                     network and Docker daemon.
   #
-  #   container       — dentro del container solamente.
-  #                     Comentar o eliminar pid y privileged.
-  #                     Útil para agentes aislados / CI / dev.
+  #   container       — inside this container only.
+  #                     No special privileges needed.
+  #                     Good for sandboxed or development workloads.
   # ─────────────────────────────────────────────────────────────────
   sentinelx-core:
     build:
@@ -20,32 +21,34 @@ services:
     container_name: sentinelx-core
     restart: unless-stopped
 
-    # Requerido solo para SENTINEL_EXEC_MODE=host
-    # Comentar estas dos líneas si usás modo container
+    # Required only when SENTINEL_EXEC_MODE=host.
+    # Comment these two lines out when using container mode.
     pid: "host"
     privileged: true
 
     environment:
-      SENTINEL_TOKEN: ${SENTINEL_TOKEN:?SENTINEL_TOKEN requerido — ver .env.example}
+      SENTINEL_TOKEN: ${SENTINEL_TOKEN:?SENTINEL_TOKEN is required — see .env.example}
       SENTINEL_EXEC_MODE: ${SENTINEL_EXEC_MODE:-host}
       AGENT_PORT: "8091"
       LOG_DIR: /var/log/sentinelx
       LOG_FILE: /var/log/sentinelx/sentinelx.log
       LOG_EXEC_FILE: /var/log/sentinelx/exec.log
-      # En modo host, los archivos temporales del /edit deben estar en un path
-      # accesible tanto desde el container (para crearlos) como desde el host
-      # (para que pensa-safe-edit via nsenter los lea). Se usa /tmp para esto.
+      # In host mode, /edit temp files must be on a path accessible both from
+      # inside the container and from the host (where pensa-safe-edit runs via
+      # nsenter). /tmp/sentinelx-uploads is bind-mounted for this purpose.
       SENTINEL_UPLOAD_DIR: ${SENTINEL_UPLOAD_DIR:-/tmp/sentinelx-uploads}
+
     volumes:
       - sentinelx-logs:/var/log/sentinelx
       - sentinelx-uploads:/var/lib/sentinelx
-      # En modo host, los uploads/temporales del /edit van a /tmp del host
-      # para que pensa-safe-edit (ejecutado via nsenter) pueda acceder a ellos.
       - /tmp/sentinelx-uploads:/tmp/sentinelx-uploads
+
     ports:
       - "127.0.0.1:8091:8091"
+
     networks:
       - sentinelx-net
+
     healthcheck:
       test: ["CMD", "curl", "-sf",
              "-H", "Authorization: Bearer ${SENTINEL_TOKEN}",
@@ -56,8 +59,15 @@ services:
       start_period: 10s
 
   # ─────────────────────────────────────────────────────────────────
-  # sentinelx-mcp
-  # Proxy MCP entre Claude y el core. Valida OIDC.
+  # sentinelx-mcp  (simple auth mode)
+  #
+  # MCP proxy between Claude/ChatGPT and the core agent.
+  # In simple mode authentication is handled by SENTINEL_TOKEN only —
+  # no OIDC provider needed. Suitable for personal use.
+  #
+  # To use full OIDC authentication, use docker-compose.oidc.yml
+  # as an override:
+  #   docker compose -f docker-compose.yml -f docker-compose.oidc.yml up -d
   # ─────────────────────────────────────────────────────────────────
   sentinelx-mcp:
     build:
@@ -68,28 +78,31 @@ services:
     depends_on:
       sentinelx-core:
         condition: service_healthy
+
     environment:
       MCP_PORT: "8099"
       SENTINELX_URL: "http://127.0.0.1:8091"
       SENTINEL_TOKEN: ${SENTINEL_TOKEN}
-      OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER requerido}
-      OIDC_JWKS_URI: ${OIDC_JWKS_URI:?OIDC_JWKS_URI requerido}
-      OIDC_EXPECTED_AUDIENCE: ${OIDC_EXPECTED_AUDIENCE:-}
+      # Simple mode: OIDC validation is disabled.
+      # The MCP accepts any request that carries the correct SENTINEL_TOKEN.
+      OIDC_ISSUER: ""
+      OIDC_JWKS_URI: ""
+      OIDC_EXPECTED_AUDIENCE: ""
       RESOURCE_URL: ${RESOURCE_URL:-https://sentinelx.example.com}
       AUTH_DEBUG: ${AUTH_DEBUG:-false}
       LOG_DIR: /var/log/sentinelx-mcp
-    # network_mode host: el MCP necesita resolver DNS externos para validar
-    # tokens OIDC (fetch del JWKS). Si el daemon Docker tiene iptables=false,
-    # los containers bridge no tienen salida a internet — host network lo resuelve.
-    # El core es accesible en 127.0.0.1:8091 (puerto del host).
+
+    # network_mode: host gives the MCP access to the host network stack.
+    # This is needed so it can reach 127.0.0.1:8091 (sentinelx-core)
+    # and resolve external DNS (e.g. for OIDC JWKS fetches in oidc mode).
     network_mode: host
+
     volumes:
       - sentinelx-mcp-logs:/var/log/sentinelx-mcp
 
 networks:
   sentinelx-net:
     driver: bridge
-    # Usada solo por sentinelx-core. El MCP usa network_mode=host.
 
 volumes:
   sentinelx-logs:

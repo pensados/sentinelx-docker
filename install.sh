@@ -365,30 +365,28 @@ read -rp "  Start SentinelX with this configuration? [Y/n]: " _confirm
 section "Step 5/6 — Building and starting SentinelX"
 
 # Pick the right compose file based on auth mode
+# Pick the right compose files based on auth mode
+COMPOSE_BASE="-f docker-compose.yml"
 if [ "$AUTH_MODE" = "oidc" ]; then
-    COMPOSE_FILE="docker-compose.oidc.yml"
+    COMPOSE_OVERRIDE="-f docker-compose.oidc.yml"
 else
-    COMPOSE_FILE="docker-compose.yml"
+    COMPOSE_OVERRIDE=""
 fi
-
-if [ ! -f "$COMPOSE_FILE" ]; then
-    warn "Compose file ${COMPOSE_FILE} not found, falling back to docker-compose.yml"
-    COMPOSE_FILE="docker-compose.yml"
-fi
+COMPOSE_CMD="docker compose ${COMPOSE_BASE} ${COMPOSE_OVERRIDE}"
 
 info "Building images..."
 cd "$INSTALL_DIR" && env -i HOME="$HOME" PATH="$PATH" \
-    docker compose -f "$COMPOSE_FILE" up -d --build
+    eval "${COMPOSE_CMD}" up -d --build
 
 info "Waiting for health checks..."
 sleep 8
 
-if docker compose -f "$COMPOSE_FILE" ps | grep -q "healthy\|running\|Up"; then
+if docker compose ${COMPOSE_BASE} ${COMPOSE_OVERRIDE} ps | grep -q "healthy\|running\|Up"; then
     info "SentinelX is running!"
 else
     warn "Containers may still be starting. Check:"
-    echo "  cd $INSTALL_DIR && docker compose -f $COMPOSE_FILE ps"
-    echo "  cd $INSTALL_DIR && docker compose -f $COMPOSE_FILE logs"
+    echo "  cd $INSTALL_DIR && ${COMPOSE_CMD} ps"
+    echo "  cd $INSTALL_DIR && ${COMPOSE_CMD} logs"
 fi
 
 # ── 7. Reverse proxy config ───────────────────────────────────────────────────
@@ -518,9 +516,9 @@ echo "    1. Go to chatgpt.com → Settings → Connected apps → Add"
 echo "    2. Paste the same URL: ${MCP_URL}/mcp"
 echo ""
 echo -e "  ${BOLD}Useful commands${NC}"
-echo "    Check status:   cd ${INSTALL_DIR} && docker compose ps"
-echo "    View logs:      cd ${INSTALL_DIR} && docker compose logs -f"
-echo "    Stop:           cd ${INSTALL_DIR} && docker compose down"
-echo "    Restart:        cd ${INSTALL_DIR} && docker compose restart"
+echo "    Check status:   cd ${INSTALL_DIR} && ${COMPOSE_CMD} ps"
+echo "    View logs:      cd ${INSTALL_DIR} && ${COMPOSE_CMD} logs -f"
+echo "    Stop:           cd ${INSTALL_DIR} && ${COMPOSE_CMD} down"
+echo "    Restart:        cd ${INSTALL_DIR} && ${COMPOSE_CMD} restart"
 echo ""
 info "Installation complete."
