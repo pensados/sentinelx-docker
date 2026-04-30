@@ -10,6 +10,17 @@
 
 set -euo pipefail
 
+# ── curl | bash self-re-exec fix ──────────────────────────────────────────────
+# When piped through bash (curl ... | bash), stdin is the pipe carrying the
+# script itself — not the terminal. This breaks all interactive prompts.
+# Solution: save the script to a temp file and re-exec it with a real terminal.
+if [ ! -t 0 ]; then
+    _tmp="$(mktemp /tmp/sentinelx-install-XXXXXX.sh)"
+    cat > "$_tmp"                  # drain the rest of stdin (the script) into file
+    chmod +x "$_tmp"
+    exec bash "$_tmp" "$@"         # re-exec with terminal stdin; curl pipe is gone
+fi
+
 # ── Colors & helpers ─────────────────────────────────────────────────────────
 GREEN="\033[0;32m"
 YELLOW="\033[1;33m"
@@ -44,7 +55,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     fi
 
     if [ -z "${SX_YES:-}" ]; then
-        read -rp "  Are you sure? This removes all containers, volumes and config [y/N]: " _confirm </dev/tty
+        read -rp "  Are you sure? This removes all containers, volumes and config [y/N]: " _confirm
         [[ "${_confirm:-n}" =~ ^[Yy]$ ]] || { info "Aborted."; exit 0; }
     fi
 
@@ -172,7 +183,7 @@ else
     if [ -n "${SX_EXEC_MODE:-}" ]; then
         _exec_choice="$SX_EXEC_MODE"
     else
-        read -rp "  Choose [1/2] (default: 1): " _exec_choice </dev/tty
+        read -rp "  Choose [1/2] (default: 1): " _exec_choice
     fi
     case "${_exec_choice:-1}" in
         2|container) EXEC_MODE="container" ;;
@@ -197,7 +208,7 @@ else
     if [ -n "${SX_AUTH_MODE:-}" ]; then
         _auth_choice="$SX_AUTH_MODE"
     else
-        read -rp "  Choose [1/2] (default: 1): " _auth_choice </dev/tty
+        read -rp "  Choose [1/2] (default: 1): " _auth_choice
     fi
     case "${_auth_choice:-1}" in
         2|oidc) AUTH_MODE="oidc" ;;
@@ -238,7 +249,7 @@ else
     if [ -n "${SX_DOMAIN_MODE:-}" ]; then
         _domain_choice="$SX_DOMAIN_MODE"
     else
-        read -rp "  Choose [1/2/3] (default: 1): " _domain_choice </dev/tty
+        read -rp "  Choose [1/2/3] (default: 1): " _domain_choice
     fi
 
     case "${_domain_choice:-1}" in
@@ -246,7 +257,7 @@ else
             DOMAIN_MODE="manual"
             echo ""
             BASE_DOMAIN="${SX_BASE_DOMAIN:-}"
-            [ -z "$BASE_DOMAIN" ] && read -rp "  Base domain (e.g. yourdomain.com): " BASE_DOMAIN </dev/tty
+            [ -z "$BASE_DOMAIN" ] && read -rp "  Base domain (e.g. yourdomain.com): " BASE_DOMAIN
             BASE_DOMAIN="${BASE_DOMAIN:-yourdomain.com}"
             MCP_SUBDOMAIN="${SX_MCP_SUBDOMAIN:-sentinelx}"
             MCP_DOMAIN="${MCP_SUBDOMAIN}.${BASE_DOMAIN}"
@@ -259,10 +270,10 @@ else
             DOMAIN_MODE="cloudflare"
             echo ""
             BASE_DOMAIN="${SX_BASE_DOMAIN:-}"
-            [ -z "$BASE_DOMAIN" ] && read -rp "  Base domain (e.g. yourdomain.com): " BASE_DOMAIN </dev/tty
+            [ -z "$BASE_DOMAIN" ] && read -rp "  Base domain (e.g. yourdomain.com): " BASE_DOMAIN
             BASE_DOMAIN="${BASE_DOMAIN:-yourdomain.com}"
             CF_TOKEN="${SX_CF_TOKEN:-}"
-            [ -z "$CF_TOKEN" ] && read -rp "  Cloudflare API Token (Zone:Edit permissions): " CF_TOKEN </dev/tty
+            [ -z "$CF_TOKEN" ] && read -rp "  Cloudflare API Token (Zone:Edit permissions): " CF_TOKEN
             MCP_SUBDOMAIN="sentinelx"
             MCP_DOMAIN="${MCP_SUBDOMAIN}.${BASE_DOMAIN}"
             if [ "$AUTH_MODE" = "oidc" ]; then
@@ -303,7 +314,7 @@ else
         echo "    dig ${MCP_DOMAIN} +short"
         echo ""
         if [ -z "${SX_SKIP_DNS_WAIT:-}" ]; then
-            read -rp "  Press Enter once the DNS records are active (or Ctrl+C to abort)..." </dev/tty
+            read -rp "  Press Enter once the DNS records are active (or Ctrl+C to abort)..."
         else
             warn "SX_SKIP_DNS_WAIT set — skipping DNS wait prompt."
         fi
@@ -330,7 +341,7 @@ else
             if [ -n "${SX_SKIP_DNS_WAIT:-}" ] || [ -n "${SX_YES:-}" ]; then
                 warn "Continuing anyway (SX_SKIP_DNS_WAIT/SX_YES set)."
             else
-                read -rp "  Continue anyway? [y/N]: " _continue </dev/tty
+                read -rp "  Continue anyway? [y/N]: " _continue
                 [[ "${_continue:-n}" =~ ^[Yy]$ ]] || exit 1
             fi
         fi
@@ -468,7 +479,7 @@ echo -e "             URL:    ${BOLD}${MCP_URL}/mcp${NC}"
 echo ""
 
 if [ -z "${SX_YES:-}" ]; then
-    read -rp "  Start SentinelX with this configuration? [Y/n]: " _confirm </dev/tty
+    read -rp "  Start SentinelX with this configuration? [Y/n]: " _confirm
     [[ "${_confirm:-y}" =~ ^[Yy]$ ]] || { warn "Aborted."; exit 0; }
 else
     info "SX_YES set — skipping confirmation."
