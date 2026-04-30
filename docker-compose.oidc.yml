@@ -99,7 +99,7 @@ services:
       KC_METRICS_ENABLED: "true"
 
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${KC_PORT:-8180}:8080"
 
     networks:
       - keycloak-net

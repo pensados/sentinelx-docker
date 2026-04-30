@@ -419,6 +419,28 @@ EOF
     chmod 600 .env
     info "Generated .env"
 
+    # ── Detect available ports ────────────────────────────────────────────────
+    # Find free ports for core and mcp in case defaults are taken
+    _find_free_port() {
+        local start=$1
+        local port=$start
+        while ss -tuln 2>/dev/null | grep -q ":${port} " ; do
+            port=$((port + 1))
+        done
+        echo $port
+    }
+    CORE_PORT=$(_find_free_port 8091)
+    MCP_PORT=$(_find_free_port 8099)
+    if [ "$AUTH_MODE" = "oidc" ]; then
+        KC_PORT=$(_find_free_port 8180)
+    fi
+    # Write port overrides to .env
+    echo "CORE_PORT=${CORE_PORT}" >> .env
+    echo "MCP_PORT=${MCP_PORT}" >> .env
+    [ "$AUTH_MODE" = "oidc" ] && echo "KC_PORT=${KC_PORT}" >> .env
+    [ "${CORE_PORT}" != "8091" ] && warn "Port 8091 in use — using ${CORE_PORT} for sentinelx-core"
+    [ "${MCP_PORT}" != "8099" ]  && warn "Port 8099 in use — using ${MCP_PORT} for sentinelx-mcp"
+
 fi # end of interactive setup block
 
 # Re-source .env to get all vars

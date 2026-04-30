@@ -29,7 +29,7 @@ services:
     environment:
       SENTINEL_TOKEN: ${SENTINEL_TOKEN:?SENTINEL_TOKEN is required — see .env.example}
       SENTINEL_EXEC_MODE: ${SENTINEL_EXEC_MODE:-host}
-      AGENT_PORT: "8091"
+      AGENT_PORT: "${CORE_PORT:-8091}"
       LOG_DIR: /var/log/sentinelx
       LOG_FILE: /var/log/sentinelx/sentinelx.log
       LOG_EXEC_FILE: /var/log/sentinelx/exec.log
@@ -44,7 +44,7 @@ services:
       - /tmp/sentinelx-uploads:/tmp/sentinelx-uploads
 
     ports:
-      - "127.0.0.1:8091:8091"
+      - "127.0.0.1:${CORE_PORT:-8091}:8091"
 
     networks:
       - sentinelx-net
@@ -80,8 +80,8 @@ services:
         condition: service_healthy
 
     environment:
-      MCP_PORT: "8099"
-      SENTINELX_URL: "http://127.0.0.1:8091"
+      MCP_PORT: "${MCP_PORT:-8099}"
+      SENTINELX_URL: "http://127.0.0.1:${CORE_PORT:-8091}"
       SENTINEL_TOKEN: ${SENTINEL_TOKEN}
       # Simple mode: OIDC validation is disabled.
       # The MCP accepts any request that carries the correct SENTINEL_TOKEN.
