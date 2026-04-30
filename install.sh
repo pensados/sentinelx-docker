@@ -31,8 +31,66 @@ INSTALL_DIR="${SENTINELX_DIR:-$HOME/sentinelx-docker}"
 DRY_RUN=0
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1 && warn "DRY-RUN mode — no containers will be started."
 
-# ── Banner ───────────────────────────────────────────────────────────────────
-clear
+# ── Uninstall mode ────────────────────────────────────────────────────────────
+if [[ "${1:-}" == "--uninstall" ]]; then
+    warn "UNINSTALL mode — this will stop and remove the SentinelX stack."
+    echo ""
+    echo "  Install directory: ${INSTALL_DIR}"
+    echo ""
+
+    if [ ! -d "$INSTALL_DIR" ]; then
+        warn "Directory $INSTALL_DIR not found — nothing to uninstall."
+        exit 0
+    fi
+
+    if [ -z "${SX_YES:-}" ]; then
+        read -rp "  Are you sure? This removes all containers, volumes and config [y/N]: " _confirm
+        [[ "${_confirm:-n}" =~ ^[Yy]$ ]] || { info "Aborted."; exit 0; }
+    fi
+
+    cd "$INSTALL_DIR"
+
+    # Source .env to know which mode was installed
+    AUTH_MODE="simple"
+    DOMAIN_MODE=""
+    AUTH_DOMAIN=""
+    MCP_DOMAIN=""
+    [ -f .env ] && source .env 2>/dev/null || true
+    [ -n "${OIDC_ISSUER:-}" ] && AUTH_MODE="oidc"
+
+    # Stop and remove containers + volumes
+    if [ -f docker-compose.oidc.yml ] && [ "$AUTH_MODE" = "oidc" ]; then
+        info "Stopping OIDC stack (containers + volumes)..."
+        docker compose -f docker-compose.yml -f docker-compose.oidc.yml down -v 2>&1 | grep -E "Removed|Stopped|Network" || true
+    elif [ -f docker-compose.yml ]; then
+        info "Stopping simple stack (containers + volumes)..."
+        docker compose -f docker-compose.yml down -v 2>&1 | grep -E "Removed|Stopped|Network" || true
+    fi
+
+    # Remove install directory
+    cd "$HOME"
+    info "Removing $INSTALL_DIR ..."
+    rm -rf "$INSTALL_DIR"
+
+    # Print DNS cleanup instructions
+    echo ""
+    section "Manual cleanup remaining"
+    echo ""
+    if [ -n "${MCP_DOMAIN:-}" ]; then
+        echo "  DNS records to remove:"
+        echo "    ${MCP_DOMAIN}"
+        [ -n "${AUTH_DOMAIN:-}" ] && echo "    ${AUTH_DOMAIN}"
+        echo ""
+    fi
+    echo "  nginx/Caddy — remove the server blocks for:"
+    [ -n "${MCP_DOMAIN:-}" ]  && echo "    ${MCP_DOMAIN}"
+    [ -n "${AUTH_DOMAIN:-}" ] && echo "    ${AUTH_DOMAIN}"
+    echo ""
+    info "SentinelX uninstalled successfully."
+    exit 0
+fi
+
+
 echo -e "${CYAN}"
 cat << 'EOF'
   ███████╗███████╗███╗   ██╗████████╗██╗███╗   ██╗███████╗██╗     ██╗  ██╗

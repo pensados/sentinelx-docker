@@ -36,6 +36,13 @@ SX_BASE_DOMAIN=yourdomain.com \
 
 Add `--dry-run` to generate `.env` without starting containers.
 
+```bash
+# Uninstall — stops containers, removes volumes and install directory
+bash ~/sentinelx-docker/install.sh --uninstall
+# or with SX_YES=1 to skip confirmation
+SX_YES=1 bash ~/sentinelx-docker/install.sh --uninstall
+```
+
 ---
 
 ## Authentication modes
