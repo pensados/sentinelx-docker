@@ -47,6 +47,16 @@ SENTINELX_SCOPES = [
     "sentinelx:ping",
 ]
 
+# Trusted domains for Keycloak DCR policy — redirect_uris in DCR requests
+# must match one of these domains
+DCR_TRUSTED_HOSTS = [
+    "claude.ai",
+    "chatgpt.com",
+    "chat.openai.com",
+    "cursor.sh",
+    "localhost",
+]
+
 # Redirect URIs — covers Claude web, Claude desktop, ChatGPT, Cursor
 REDIRECT_URIS = [
     "https://claude.ai/api/mcp/auth_callback",
@@ -260,6 +270,38 @@ def main() -> None:
         print("  DCR enabled.", flush=True)
     except Exception as e:
         print(f"  Note: DCR config: {e}", flush=True)
+
+    # 6b. Configure Trusted Hosts policy for DCR
+    # By default Keycloak rejects DCR requests where redirect_uris don't
+    # match a trusted host/domain. We need to add claude.ai, chatgpt.com etc.
+    print("Configuring DCR Trusted Hosts policy...", flush=True)
+    try:
+        comps = api("GET",
+            f"/admin/realms/{REALM}/components"
+            f"?type=org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy",
+            token)
+        th = next((c for c in comps if c.get("providerId") == "trusted-hosts"
+                   and c.get("subType") == "anonymous"), None)
+        if th:
+            update = {
+                "id": th["id"],
+                "name": th["name"],
+                "providerId": th["providerId"],
+                "providerType": th["providerType"],
+                "parentId": th["parentId"],
+                "subType": th["subType"],
+                "config": {
+                    "host-sending-registration-request-must-match": ["false"],
+                    "trusted-hosts": DCR_TRUSTED_HOSTS,
+                    "client-uris-must-match": ["true"],
+                },
+            }
+            api("PUT", f"/admin/realms/{REALM}/components/{th['id']}", token, update)
+            print(f"  Trusted hosts configured: {DCR_TRUSTED_HOSTS}", flush=True)
+        else:
+            print("  Trusted Hosts policy not found — skipping.", flush=True)
+    except Exception as e:
+        print(f"  Warning: {e}", flush=True)
 
     # 7. Build OIDC values
     issuer   = f"https://{AUTH_DOMAIN}/realms/{REALM}"
