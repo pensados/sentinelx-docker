@@ -1,3 +1,20 @@
+> ## ⚠️ This repository is archived and no longer maintained
+>
+> SentinelX has evolved into a multi-host, hub-managed platform. Active
+> development happens at **[pensados/sentinelx-cloud-core](https://github.com/pensados/sentinelx-cloud-core)**
+> (Apache 2.0).
+>
+> This repo provided a **Docker-compose deployment** of the original
+> SentinelX (Core + MCP bridge + Keycloak). It works, but receives no
+> further updates. If you specifically want a self-contained Docker
+> setup without depending on the hub at `mcp.sentinelx.app`, this repo
+> remains a valid (unmaintained) reference. The license remains MIT —
+> forks are welcome to continue independently.
+>
+> Live product: **[sentinelx.pensa.ar](https://sentinelx.pensa.ar/)**
+
+---
+
 # sentinelx-docker
 
 Docker deployment stack for [SentinelX Core](https://github.com/pensados/sentinelx-core) + [SentinelX Core MCP](https://github.com/pensados/sentinelx-core-mcp).
