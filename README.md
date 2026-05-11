@@ -1,17 +1,22 @@
-> ## ⚠️ This repository is archived and no longer maintained
+> ## 📦 SentinelX Docker — self-hosted edition
 >
-> SentinelX has evolved into a multi-host, hub-managed platform. Active
-> development happens at **[pensados/sentinelx-cloud-core](https://github.com/pensados/sentinelx-cloud-core)**
-> (Apache 2.0).
+> Run the full SentinelX stack on your own infrastructure: **agent + MCP
+> bridge + Keycloak + Postgres**, all wired up with `docker-compose`. No
+> dependency on any managed hub — you own the entire stack.
 >
-> This repo provided a **Docker-compose deployment** of the original
-> SentinelX (Core + MCP bridge + Keycloak). It works, but receives no
-> further updates. If you specifically want a self-contained Docker
-> setup without depending on the hub at `mcp.sentinelx.app`, this repo
-> remains a valid (unmaintained) reference. The license remains MIT —
-> forks are welcome to continue independently.
+> This is the recommended path for users who want full data sovereignty,
+> air-gapped deployments, or simply prefer to self-host.
 >
-> Live product: **[sentinelx.pensa.ar](https://sentinelx.pensa.ar/)**
+> Built on the classic single-host SentinelX core (`sentinelx-core`) and
+> the MCP bridge (`sentinelx-core-mcp`). Both component repos are
+> archived (frozen) but their code is bundled here as docker images.
+> Functional and supported as the official self-hosted edition.
+>
+> For the actively-developed multi-host cloud agent (separate model,
+> connects to a managed or self-hosted hub), see
+> **[pensados/sentinelx-cloud-core](https://github.com/pensados/sentinelx-cloud-core)**.
+>
+> Live product (managed cloud option): **[sentinelx.pensa.ar](https://sentinelx.pensa.ar/)**
 
 ---
 
